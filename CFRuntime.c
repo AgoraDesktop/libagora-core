@@ -282,10 +282,23 @@ int __CFConstantStringClassReference[12] = {0};
 #endif
 #endif
 
+/* AGORA: A WEAK DEFINITION, SO THE FOUNDATION SIDE CAN SUPPLY THE CLASS.
+ *
+ * clang emits every CFSTR as a static struct whose isa is &__CFConstantStringClassReference -- a BARE
+ * SYMBOL, not a class symbol -- and the layout is clang's: {isa, uint32 flags, const char *cstr,
+ * uintptr length}, 32 bytes. For the object to be a real Foundation string, that symbol's storage must
+ * BE the class, and only one translation unit can define it. Upstream has the same arrangement for the
+ * Swift runtime: CFString.h declares `_CF_CONSTANT_STRING_SWIFT_CLASS` and the Foundation side defines
+ * it. The non-Swift path had no one playing Foundation's part, so the blob stayed zeroed and any class
+ * operation on a CFSTR segfaulted.
+ *
+ * Weakly defined here so that libagora-base's strong definition -- its constant-string class for exactly
+ * clang's layout -- wins at load, and so that a Core Foundation with no Foundation beside it still links
+ * and still gets a zeroed placeholder rather than a missing symbol. */
 #if TARGET_RT_64_BIT
-int __CFConstantStringClassReference[24] = {0};
+__attribute__((weak)) int __CFConstantStringClassReference[24] = {0};
 #else
-int __CFConstantStringClassReference[12] = {0};
+__attribute__((weak)) int __CFConstantStringClassReference[12] = {0};
 #endif
 
 void *__CFConstantStringClassReferencePtr = NULL;
