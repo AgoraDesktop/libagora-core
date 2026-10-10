@@ -607,7 +607,24 @@ CFTypeRef _CFRuntimeCreateInstance(CFAllocatorRef allocator, CFTypeID typeID, CF
         memory->_cfinfoa = (uint32_t)((1 << 24) | typeIDMasked | usesDefaultAllocatorMasked);
     }
 #endif
-    memory->_cfisa = __CFISAForTypeID(typeID);
+/* AGORA: A CORE FOUNDATION OBJECT WEARS NO CLASS. This was
+     *   memory->_cfisa = __CFISAForTypeID(typeID);
+     * and that one line is what made a native CF object indistinguishable from a Foundation one once the
+     * bridge was registered: every CFArrayCreate() came back with isa == [NSArray class], so CF_IS_OBJC
+     * answered YES for CF's OWN array, CFArrayAppendValue dispatched into Foundation, and an immutable
+     * NSArray was asked to -addObject:. Measured: CFArrayCreateMutable's isa was 0x7f8587bc5470
+     * (NSArray) with cfinfoa 0x100001386, against kCFBooleanTrue's isa 0 and cfinfoa 0x1580.
+     *
+     * __CFRuntimeObjCClassTable ANSWERS TWO QUESTIONS AND THEY ARE DIFFERENT ONES:
+     *   CF_IS_OBJC asks "is this object an instance of the class FOUNDATION bridges this type to?" -- the
+     *   cluster root, so @[@1,@2] is recognised as a CFArray;
+     *   this assignment asked "what class should CF's OWN object wear?" -- and the answer cannot be
+     *   Foundation's, because Foundation's methods do not know CF's storage.
+     * Apple answers the second with a CF-owned class (__NSCFArray) whose methods ARE Core Foundation's.
+     * Agora has no such class, so a CF object wears none, which is what kCFBooleanTrue has always done
+     * and what CF_IS_OBJC already handles (a zero class is not an object). Foundation's objects keep
+     * their own isas and are still recognised, by the chain walk in _CFIsObjC. */
+    memory->_cfisa = 0;
     if (NULL != cls->init) {
 	(cls->init)(memory);
     }
