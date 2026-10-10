@@ -37,7 +37,10 @@ Agora does not support Swift, so the Swift toolchain integration has been remove
   exposed the library to Swift;
 - in **`CMakeLists.txt`**, removed the `INTERFACE` `-Xcc -fmodule-map-file=…` compile option and
   pointed the install rules at ordinary `include/CoreFoundation` and `lib` destinations, replacing
-  upstream's `lib/swift` and `lib/swift_static` Swift-toolchain paths.
+  upstream's `lib/swift` and `lib/swift_static` Swift-toolchain paths;
+- also in **`CMakeLists.txt`**, removed the `Foundation_EXPORTS` global property (the Swift build's
+  exported-targets hook) and the `file(COPY … _CModulesForClients …)` header copy that fed the Swift
+  XCTest clients.
 
 The C sources and headers are otherwise untouched. Upstream's Swift *runtime* surface is **kept**: the
 `_CFSwiftBridge` / `_NS*Bridge` machinery, the `CF_SWIFT_*` attributes, and the `DEPLOYMENT_RUNTIME_SWIFT`
