@@ -58,10 +58,10 @@ and the `dispatch` dependency. `CMakeLists.txt` is now Agora's own top-level bui
 - **system ICU** — the `_foundation_unicode/` include prefix that the `swift-foundation-icu` package
   provides is recreated as a symbolic link to the system ICU headers, and `_FoundationICU` is an
   interface target over `ICU::uc`, `ICU::i18n` and `ICU::data`;
-- **the `libagora-dispatch` sibling** — dispatch and the blocks runtime come from that component
-  (built in-tree, or found with `find_package(dispatch CONFIG)`); an include shim exposes its public
-  and private headers as `dispatch/*.h`, plus its `os/*.h`, which is the layout Core Foundation's
-  sources expect;
+- **the `libagora-dispatch` sibling** — dispatch and the blocks runtime are a separate component,
+  built on its own into its own `build/` and found with `find_package(dispatch CONFIG)`; an include
+  shim adds its private headers (which share the `dispatch/` prefix) and its `os/*.h`, the layout
+  Core Foundation's sources expect;
 - **`_Foundation_common_build_flags`** — defined for the C sources, with only the Swift-specific
   entries dropped;
 - **the artifact name** — the static library is built as `libagora-core.a`

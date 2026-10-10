@@ -4,15 +4,20 @@
 #
 # Upstream Core Foundation is a subdirectory of Apple's swift-corelibs-foundation
 # Swift build, which supplies the `project()`, the `_Foundation_common_build_flags`
-# variable, the `_FoundationICU` target and the `dispatch` dependency. This file
-# is Agora's replacement for that scaffolding, so libagora-core builds on its own
-# with clang, against:
+# variable, the `_FoundationICU` target and the `dispatch` dependency. This file is
+# Agora's replacement for that scaffolding, so libagora-core builds on its own with
+# clang against:
 #
 #   * the *system* ICU (a `_foundation_unicode/` include prefix is recreated as a
 #     link to the system ICU headers, in place of the `swift-foundation-icu`
 #     package); and
-#   * the sibling `libagora-dispatch` component (dispatch + BlocksRuntime),
-#     built in-tree, or found installed via `find_package(dispatch CONFIG)`.
+#   * the sibling `libagora-dispatch` component — a separate repository, built on
+#     its own and found here with `find_package(dispatch CONFIG)`.
+#
+# Build into `build/`:
+#
+#   cmake -S . -B build
+#   cmake --build build
 #
 # See PROVENANCE.md for what Agora changed relative to upstream.
 #
@@ -31,40 +36,40 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
 endif()
 
 # ---------------------------------------------------------------------------
-# Dependency: the sibling libagora-dispatch component.
+# Dependency: the sibling libagora-dispatch component, built on its own into its
+# own build/. Point `-Ddispatch_DIR=<libagora-dispatch>/build/cmake/modules` (or
+# any directory holding a `dispatchConfig.cmake`) if the default guess misses.
 # ---------------------------------------------------------------------------
-set(AGORA_DISPATCH_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../libagora-dispatch"
+set(AGORA_DISPATCH_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../libagora-dispatch"
     CACHE PATH "Source directory of the libagora-dispatch component")
-if(EXISTS "${AGORA_DISPATCH_SOURCE_DIR}/CMakeLists.txt")
-  # Expose libagora-dispatch's private headers as `dispatch/*.h`, which is how
-  # Core Foundation includes them.
-  set(INSTALL_PRIVATE_HEADERS ON)
-  # Only the dispatch library is wanted here, not libagora-dispatch's test suite.
-  set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
-  add_subdirectory("${AGORA_DISPATCH_SOURCE_DIR}" "${CMAKE_BINARY_DIR}/libagora-dispatch")
-else()
-  find_package(dispatch CONFIG REQUIRED)
+if(NOT dispatch_DIR AND EXISTS "${AGORA_DISPATCH_DIR}/build/cmake/modules/dispatchConfig.cmake")
+  set(dispatch_DIR "${AGORA_DISPATCH_DIR}/build/cmake/modules" CACHE PATH
+      "Directory holding libagora-dispatch's dispatchConfig.cmake")
 endif()
+find_package(dispatch CONFIG REQUIRED)
 
 # ---------------------------------------------------------------------------
 # Include shim: the header layout Core Foundation's sources expect.
-#   <dispatch/*.h>            libdispatch public + private headers
-#   <os/*.h>                  libdispatch's os_object headers
+#   <dispatch/*.h>            libagora-dispatch public + private headers
+#   <os/*.h>                  libagora-dispatch's os_object headers
 #   <_foundation_unicode/*.h> the system ICU headers
+# (The dispatch/ and os/ entries add the *private* headers, which share the
+# `dispatch/` prefix, and the ICU prefix Core Foundation was written against.)
 # ---------------------------------------------------------------------------
 find_package(ICU REQUIRED COMPONENTS uc i18n data)
 
 set(_agora_include_dir "${CMAKE_BINARY_DIR}/agora-include")
+file(REMOVE_RECURSE "${_agora_include_dir}")
 file(MAKE_DIRECTORY "${_agora_include_dir}/dispatch")
-file(CREATE_LINK "${AGORA_DISPATCH_SOURCE_DIR}/os"
-     "${_agora_include_dir}/os" SYMBOLIC)
 file(GLOB _agora_dispatch_headers
-     "${AGORA_DISPATCH_SOURCE_DIR}/dispatch/*.h"
-     "${AGORA_DISPATCH_SOURCE_DIR}/private/*.h")
+     "${AGORA_DISPATCH_DIR}/dispatch/*.h"
+     "${AGORA_DISPATCH_DIR}/private/*.h")
 foreach(_hdr IN LISTS _agora_dispatch_headers)
   get_filename_component(_name "${_hdr}" NAME)
   file(CREATE_LINK "${_hdr}" "${_agora_include_dir}/dispatch/${_name}" SYMBOLIC)
 endforeach()
+file(CREATE_LINK "${AGORA_DISPATCH_DIR}/os"
+     "${_agora_include_dir}/os" SYMBOLIC)
 
 set(_agora_icu_include_root "")
 foreach(_dir IN LISTS ICU_INCLUDE_DIRS)
