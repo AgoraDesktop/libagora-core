@@ -981,6 +981,7 @@ CF_INLINE uintptr_t __CFISAForTypeID(CFTypeID typeID) {
  * =========================================================================== */
 CF_PRIVATE Boolean _CFIsObjC(CFTypeID typeID, void *obj);
 CF_PRIVATE CFTypeID _CFBridgedTypeIDForObject(const void *obj);
+CF_PRIVATE Boolean _CFIsAnObject(const void *obj);
 #define CF_IS_OBJC(typeID, obj) _CFIsObjC(typeID, obj)
 
 #include "CFBridgedMethods.h"

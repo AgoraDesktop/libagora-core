@@ -351,6 +351,15 @@ extern void *object_getClass(void *obj);
  *
  * A Core Foundation object returns _kCFRuntimeNotATypeID: it wears no class (see
  * _CFRuntimeCreateInstance), so object_getClass is NULL for it and no chain exists. */
+/* AGORA: IS THIS POINTER AN OBJECTIVE-C OBJECT AT ALL? Cheap, and it needs no type id -- which matters,
+ * because CFRetain and CFRelease ask it on every call. A CORE FOUNDATION OBJECT WEARS NO CLASS (see
+ * _CFRuntimeCreateInstance), so its _cfisa is 0 and object_getClass answers NULL; a Foundation object has
+ * an isa, and a small object has tag bits the runtime decodes. Measured: kCFBooleanTrue's word 0 is 0
+ * while its cfinfoa sits at word 1, so the two can never be confused for one another. */
+CF_PRIVATE Boolean _CFIsAnObject(const void *obj) {
+    return obj != NULL && object_getClass((void *)obj) != NULL;
+}
+
 CF_PRIVATE CFTypeID _CFBridgedTypeIDForObject(const void *obj) {
     uintptr_t cls;
     CFTypeID type;
@@ -812,6 +821,14 @@ CF_PRIVATE void __CFGenericValidateType_(CFTypeRef cf, CFTypeID type, const char
     if (cf && CF_IS_SWIFT(type, (CFSwiftRef)cf)) return;
 #endif
     if (cf && CF_IS_OBJC(type, cf)) return;
+    /* AGORA: A BRIDGED OBJECT IS EXEMPT, AND BEFORE THE READ RATHER THAN AFTER IT. The
+     * assertion below reads the type word at offset 0 -- the isa for a Foundation object,
+     * and for a tagged pointer not an address at all. The typed variant of this macro
+     * already returns early for a bridged object; this is the same exemption for the
+     * generic one, which is the door CFRetain, CFRelease and the other generic doors use. */
+    if (_CFIsAnObject(cf)) {
+        return;
+    }
     CFAssert2((cf != NULL) && (NULL != __CFRuntimeClassTable[__CFGenericTypeID_inline(cf)]) && (_kCFRuntimeIDNotAType != __CFGenericTypeID_inline(cf)) && (_kCFRuntimeIDCFType != __CFGenericTypeID_inline(cf)), __kCFLogAssertion, "%s(): pointer %p is not a CF object", func, cf); \
     CFAssert3(__CFGenericTypeID_inline(cf) == type, __kCFLogAssertion, "%s(): pointer %p is not a %s", func, cf, __CFRuntimeClassTable[type]->className);	\
 }
@@ -910,8 +927,19 @@ CFTypeRef _CFNonObjCRetain(CFTypeRef cf) {
     return _CFRetain(cf, false);
 }
 
+extern void *objc_retain(void *obj);
+extern void objc_release(void *obj);
+
 CFTypeRef CFRetain(CFTypeRef cf) {
     if (NULL == cf) { CRSetCrashLogMessage("*** CFRetain() called with NULL ***"); HALT; }
+    /* AGORA: A BRIDGED OBJECT IS RETAINED AS AN OBJECT -- libobjc2's own objc_retain, not _CFRetain,
+     * which reads the reference count out of cfinfoa. For a Foundation object that word is its isa, and
+     * for a small object it is not an address at all: SIGSEGV in CFRetain with rdi 0xd19766cde000002c.
+     * The reference count belongs to whichever side made the object, and a tagged pointer's retain is a
+     * no-op either way. */
+    if (_CFIsAnObject(cf)) {
+        return (CFTypeRef)objc_retain((void *)cf);
+    }
     __CFGenericAssertIsCF(cf);
     return _CFRetain(cf, false);
 }
@@ -930,6 +958,11 @@ void _CFNonObjCRelease(CFTypeRef cf) {
 
 void CFRelease(CFTypeRef cf) {
     if (NULL == cf) { CRSetCrashLogMessage("*** CFRelease() called with NULL ***"); HALT; }
+    /* AGORA: and released as one, for the same reason as CFRetain above. */
+    if (_CFIsAnObject(cf)) {
+        objc_release((void *)cf);
+        return;
+    }
     __CFGenericAssertIsCF(cf);
     _CFRelease(cf);
 }
