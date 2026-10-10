@@ -165,6 +165,8 @@ typedef struct os_log_s *os_log_t;
 #include "ForFoundationOnly.h"
 #include "ForSwiftFoundationOnly.h"
 
+#include "CFBridgedMethods.h"
+
 /* The Objective-C spellings of the values the dispatch path passes (CFBridgingTypes.h). */
 #include "CFBridgingTypes.h"
 #include "CFString.h"
@@ -983,8 +985,6 @@ CF_PRIVATE Boolean _CFIsObjC(CFTypeID typeID, void *obj);
 CF_PRIVATE CFTypeID _CFBridgedTypeIDForObject(const void *obj);
 CF_PRIVATE Boolean _CFIsAnObject(const void *obj);
 #define CF_IS_OBJC(typeID, obj) _CFIsObjC(typeID, obj)
-
-#include "CFBridgedMethods.h"
 
 #if defined(__OBJC__)
 /* THE RECEIVER IS CAST TO THE BRIDGED CONTRACT (CFBridgedMethods.h), which is where a message's result

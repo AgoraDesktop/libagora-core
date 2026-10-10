@@ -31,8 +31,21 @@
 
 #include "CFBase.h"
 #include "CFStream.h"
-#include "CFString.h"
-#include "CFAttributedString.h"
+/* NOT CFString.h OR CFAttributedString.h. They define struct __CFString and struct __CFAttributedString,
+ * and including them made this translation unit encode CFStringRef as the COMPLETE struct while base,
+ * which only ever sees the opaque typedef, encodes it as ^{__CFString=}. libobjc2 reported that as
+ * 'incorrect signature' on -_cfurl and -_createSubstringWithRange:. CFBase.h already declares both
+ * names, opaque, which is the view the other side has. */
+
+/* THE FOUR ATTRIBUTED-STRING AND MUTABLE-STRING NAMES, DECLARED HERE AND NOT INCLUDED.
+ * CFString.h and CFAttributedString.h DEFINE their structs, and including them made this translation
+ * unit encode CFStringRef as the complete struct while base -- which only ever sees the opaque typedef
+ * -- encodes it as ^{__CFString=}. libobjc2 reported exactly that as 'incorrect signature' on -_cfurl
+ * and -_createSubstringWithRange:. Declaring the names opaque is the view the other side has, and the
+ * repeated typedef is identical to the header one wherever both are seen, which C allows. */
+typedef const struct __CFAttributedString *CFAttributedStringRef;
+typedef struct __CFAttributedString *CFMutableAttributedStringRef;
+typedef struct __CFString *CFMutableStringRef;
 #include "CFBridgingTypes.h"	/* a sibling, reached the way CFInternal.h reaches its own */
 
 @protocol __CFBridgedMethods
