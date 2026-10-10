@@ -510,9 +510,22 @@ CFTypeID _CFRuntimeRegisterClass(const CFRuntimeClass * const cls) {
     return typeID;
 }
 
+#if defined(__OBJC__)
+/* Defined below; the registration above needs it. */
+static uintptr_t cf_bridged_subclass(CFTypeID typeID, const void *cls_ref);
+#endif
+
 void _CFRuntimeBridgeTypeToClass(CFTypeID cf_typeID, const void *cls_ref) {
     os_unfair_lock_lock(&__CFBigRuntimeFunnel);
     __CFRuntimeObjCClassTable[cf_typeID] = (uintptr_t)cls_ref;
+#if defined(__OBJC__)
+    /* AND CORE FOUNDATION MAKES ITS OWN CLASS FROM IT -- see cf_bridged_subclass below. Both go in the
+     * same lock, because a registration that installed the class but not Core Foundation's own would be
+     * a window in which a created object wears the wrong one. */
+    if (cf_typeID == _kCFRuntimeIDCFString && cls_ref != NULL && __CFRuntimeCFOwnClassTable[cf_typeID] == 0) {
+        __CFRuntimeCFOwnClassTable[cf_typeID] = cf_bridged_subclass(cf_typeID, cls_ref);
+    }
+#endif
     os_unfair_lock_unlock(&__CFBigRuntimeFunnel);
 }
 
