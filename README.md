@@ -53,4 +53,18 @@ cmake --build build
 - It produces the static library `build/libagora-core.a`; a CFString/CFArray/CFURL/CFRunLoop
   smoke test links and runs. GCC is not a supported compiler.
 
+## Consuming
+
+The build installs a CMake package, so another component links it directly:
+
+```cmake
+find_package(CoreFoundation CONFIG REQUIRED)
+target_link_libraries(app PRIVATE CoreFoundation::CoreFoundation)
+```
+
+Configure with `-DCMAKE_PREFIX_PATH=<install prefix>` and
+`-Ddispatch_DIR=<libagora-dispatch>/build/cmake/modules`. That pulls in ICU, threads, `libm`/`libdl`
+and the `dispatch` component, and adds the compile options Core Foundation's headers need
+(`-fblocks`, `-fconstant-cfstrings`).
+
 See [`PROVENANCE.md`](PROVENANCE.md) for how this differs from upstream's Swift-based build.

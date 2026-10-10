@@ -95,7 +95,7 @@ file(CREATE_LINK "${_agora_icu_include_root}/unicode"
 # `_FoundationICU` — upstream's name for Core Foundation's ICU dependency,
 # backed here by the system ICU.
 add_library(_FoundationICU INTERFACE)
-target_include_directories(_FoundationICU INTERFACE "${_agora_include_dir}")
+target_include_directories(_FoundationICU INTERFACE "$<BUILD_INTERFACE:${_agora_include_dir}>")
 target_link_libraries(_FoundationICU INTERFACE ICU::uc ICU::i18n ICU::data)
 
 # ---------------------------------------------------------------------------
@@ -237,12 +237,19 @@ target_compile_definitions(CoreFoundation PRIVATE
   $<$<AND:$<PLATFORM_ID:Windows>,$<NOT:$<BOOL:${BUILD_SHARED_LIBS}>>>:CF_WINDOWS_EXECUTABLE_INITIALIZER>)
 target_include_directories(CoreFoundation
     PUBLIC
-        include
+        "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+        "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
     PRIVATE
         internalInclude)
 
 target_compile_options(CoreFoundation PRIVATE
     "SHELL:$<$<COMPILE_LANGUAGE:C>:${_Foundation_common_build_flags}>")
+
+# Core Foundation's headers use blocks, and CFSTR is a compile-time constant, so a
+# consumer needs these too: make them part of the usage requirements.
+target_compile_options(CoreFoundation INTERFACE
+    "$<$<COMPILE_LANGUAGE:C,CXX>:-fblocks>"
+    "$<$<COMPILE_LANGUAGE:C,CXX>:-fconstant-cfstrings>")
 
 target_precompile_headers(CoreFoundation PRIVATE internalInclude/CoreFoundation_Prefix.h)
 
@@ -250,7 +257,9 @@ target_link_libraries(CoreFoundation
     PRIVATE
         _FoundationICU
         dispatch
-        Threads::Threads)
+        Threads::Threads
+        m
+        ${CMAKE_DL_LIBS})
 
 if(CMAKE_SYSTEM_NAME STREQUAL "WASI")
     # On WASI, we use vendored BlocksRuntime instead of the one from libdispatch
@@ -262,9 +271,29 @@ endif()
 install(DIRECTORY
             include/
         DESTINATION
-            include/CoreFoundation)
+            ${CMAKE_INSTALL_INCLUDEDIR}/CoreFoundation)
 
-install(TARGETS CoreFoundation
-    ARCHIVE DESTINATION lib
-    LIBRARY DESTINATION lib
-    RUNTIME DESTINATION bin)
+install(TARGETS CoreFoundation _FoundationICU
+    EXPORT CoreFoundationTargets
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+include(CMakePackageConfigHelpers)
+
+install(EXPORT CoreFoundationTargets
+    FILE CoreFoundationTargets.cmake
+    NAMESPACE CoreFoundation::
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/CoreFoundation)
+
+configure_package_config_file(cmake/CoreFoundationConfig.cmake.in
+    ${CMAKE_CURRENT_BINARY_DIR}/CoreFoundationConfig.cmake
+    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/CoreFoundation)
+write_basic_package_version_file(
+    ${CMAKE_CURRENT_BINARY_DIR}/CoreFoundationConfigVersion.cmake
+    VERSION 1.0.0
+    COMPATIBILITY SameMajorVersion)
+install(FILES
+    ${CMAKE_CURRENT_BINARY_DIR}/CoreFoundationConfig.cmake
+    ${CMAKE_CURRENT_BINARY_DIR}/CoreFoundationConfigVersion.cmake
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/CoreFoundation)

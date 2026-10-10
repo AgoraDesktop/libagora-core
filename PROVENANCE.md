@@ -89,10 +89,16 @@ and the `dispatch` dependency. `CMakeLists.txt` is now Agora's own top-level bui
   dropped;
 - **the artifact name** — the static library is built as `libagora-core.a`
   (`set_target_properties(CoreFoundation PROPERTIES OUTPUT_NAME agora-core)`); the CMake target keeps
-  upstream's name, `CoreFoundation`.
+  upstream's name, `CoreFoundation`;
+- **a CMake package** — the build installs an export plus `CoreFoundationConfig.cmake`, so another
+  component consumes it with `find_package(CoreFoundation CONFIG)`. The exported target carries the
+  usage requirements a consumer needs: `-fblocks` and `-fconstant-cfstrings` (Core Foundation's
+  headers use blocks and `CFSTR`), the `m` and `dl` libraries, and the `dispatch` / ICU / Threads
+  dependencies, which the package config finds.
 
-Verified: `libagora-core.a` builds with clang (0 warnings), and a CFString / CFArray / CFURL /
-CFRunLoop smoke test links and runs.
+Verified: `libagora-core.a` builds with clang (0 warnings); a CFString / CFArray / CFURL / CFRunLoop
+smoke test links and runs; and a standalone consumer project using `find_package(CoreFoundation CONFIG)`
+against an installed prefix configures, links and runs.
 
 ## Licence and attribution
 

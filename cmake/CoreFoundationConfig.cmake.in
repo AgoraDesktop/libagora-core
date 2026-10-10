@@ -1,0 +1,30 @@
+@PACKAGE_INIT@
+
+# Consume Core Foundation (libagora-core), Agora's Swift-free Core Foundation.
+#
+# Its dependencies come along automatically: the system ICU, threads, and the
+# sibling libagora-dispatch component. libagora-dispatch ships a build-tree
+# package, so point `dispatch_DIR` at <libagora-dispatch>/build/cmake/modules
+# (or put that on CMAKE_PREFIX_PATH) before finding this package.
+
+include(CMakeFindDependencyMacro)
+
+find_dependency(Threads)
+find_dependency(ICU COMPONENTS uc i18n data)
+
+# libagora-dispatch's exported `dispatch` target references libdispatch's `RT::rt`
+# imported target (it does when libagora-dispatch is built static); materialise it
+# if libagora-dispatch's own module has not already done so.
+find_dependency(dispatch CONFIG)
+if(NOT TARGET RT::rt)
+  find_library(_CoreFoundation_RT_LIBRARY NAMES rt)
+  if(_CoreFoundation_RT_LIBRARY)
+    add_library(RT::rt UNKNOWN IMPORTED)
+    set_target_properties(RT::rt PROPERTIES IMPORTED_LOCATION "${_CoreFoundation_RT_LIBRARY}")
+  endif()
+  unset(_CoreFoundation_RT_LIBRARY CACHE)
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/CoreFoundationTargets.cmake")
+
+check_required_components(CoreFoundation)
