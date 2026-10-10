@@ -31,7 +31,7 @@
 
 #include "CFBase.h"
 #include "CFStream.h"
-#include <CoreFoundation/CFBridgingTypes.h>
+#include "CFBridgingTypes.h"	/* a sibling, reached the way CFInternal.h reaches its own */
 
 @protocol __CFBridgedMethods
 /* NSArray/NSMutableArray: CFArray.c's immutability test. */

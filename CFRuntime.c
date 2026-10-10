@@ -291,8 +291,42 @@ int __CFConstantStringClassReference[12] = {0};
 void *__CFConstantStringClassReferencePtr = NULL;
 #endif
 
+/* AGORA: WHETHER AN OBJECT IS AN OBJECTIVE-C INSTANCE OF THE CLASS A CORE FOUNDATION TYPE BRIDGES TO,
+ * and THE COMPARISON IS BY SUBCLASS RATHER THAN BY EQUALITY.
+ *
+ * Apple's function here is a wrapper around the macro, and the macro asks the equality question --
+ * `_CFTypeGetClass(obj) == __CFISAForTypeID(typeID)`. That is the shape upstream needs: under the Swift
+ * runtime every bridged object is an instance of ONE class, so one slot per type id matches.
+ *
+ * LIBAGORA-BASE IS A CLASS CLUSTER, SO EQUALITY MATCHES NOTHING. `@[]` is an AGArrayEmpty, `@[@1]` an
+ * AGArrayOne, `@[@1,@2]` an AGArraySmall and `[NSMutableArray array]` an AGArrayMutable; libagora-base
+ * alone declares AGArrayEmpty, AGArrayItems, AGArrayMutable, AGArrayOne and AGArraySmall against
+ * CFArrayGetTypeID(), and the same holds for data, dictionaries, sets, ordered sets, numbers and strings.
+ * `_CFRuntimeBridgeTypeToClass` has one slot per type id and Foundation registers the cluster's ROOT, so
+ * the question with an answer is whether the object's class chain reaches that root.
+ *
+ * `class_getSuperclass` IS THE RUNTIME'S OWN DOOR, declared here rather than included because this
+ * translation unit is C and Core Foundation's build puts the runtime's headers on the path only for its
+ * Objective-C units. It is an ordinary C function in libobjc2 with the obvious signature.
+ */
+extern void *class_getSuperclass(void *cls);
+
 Boolean _CFIsObjC(CFTypeID typeID, void *obj) {
-    return CF_IS_OBJC(typeID, obj);
+    uintptr_t want, cls;
+
+    if (typeID == _kCFRuntimeNotATypeID || obj == NULL) {
+        return false;
+    }
+    want = __CFISAForTypeID(typeID);
+    if (want == 0) {
+        return false;	/* this type is not bridged to a class at all */
+    }
+    for (cls = _CFTypeGetClass(obj); cls != 0; cls = (uintptr_t)class_getSuperclass((void *)cls)) {
+        if (cls == want) {
+            return true;
+        }
+    }
+    return false;
 }
 
 CFTypeID _CFRuntimeRegisterClass(const CFRuntimeClass * const cls) {

@@ -979,8 +979,8 @@ CF_INLINE uintptr_t __CFISAForTypeID(CFTypeID typeID) {
  * one is not, they stay the no-ops they were, which keeps a C-only Core
  * Foundation building exactly as before.
  * =========================================================================== */
-#define CF_IS_OBJC(typeID, obj) \
-    (__CFISAForTypeID(typeID) != 0 && _CFTypeGetClass(obj) == __CFISAForTypeID(typeID))
+CF_PRIVATE Boolean _CFIsObjC(CFTypeID typeID, void *obj);
+#define CF_IS_OBJC(typeID, obj) _CFIsObjC(typeID, obj)
 
 #include "CFBridgedMethods.h"
 
