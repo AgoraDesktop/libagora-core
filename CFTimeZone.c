@@ -509,7 +509,7 @@ static Boolean __CFParseTimeZoneData(CFAllocatorRef allocator, CFDataRef data, C
     if (len < (int32_t)sizeof(struct tzhead)) {
 	return false;
     }
-    
+
     if (!(p[0] == 'T' && p[1] == 'Z' && p[2] == 'i' && p[3] == 'f')) return false;  /* Don't parse without TZif at head of file */
    
     p += 20 + 4 + 4 + 4;	/* skip reserved, ttisgmtcnt, ttisstdcnt, leapcnt */
@@ -716,7 +716,7 @@ static void __InitTZStrings(void) {
 
 static CFTimeZoneRef __CFTimeZoneCreateSystem(void) {
     CFTimeZoneRef result = NULL;
-    
+
     CFStringRef name = NULL;
     
 #if TARGET_OS_WIN32
@@ -1540,6 +1540,12 @@ BOOL __CFTimeZoneGetWin32SystemTime(SYSTEMTIME * sys_time, CFAbsoluteTime time)
 
 CFTimeInterval CFTimeZoneGetSecondsFromGMT(CFTimeZoneRef tz, CFAbsoluteTime at) {
     CFIndex idx;
+    /* AGORA: THE DISPATCH LINE THIS DOOR WAS MISSING. Same defect as CFArrayGetValueAtIndex: the
+ * assertion below EXEMPTS a bridged object and the door then reads Core Foundation's storage
+ * anyway -- measured as SIGSEGV with a Foundation NSTimeZone. The selector is the same
+ * ...ForAbsoluteTime: shape the two doors beside this one already use, because Core
+ * Foundation cannot make an NSDate. */
+    CF_OBJC_FUNCDISPATCHV(CFTimeZoneGetTypeID(), CFTimeInterval, (NSTimeZone *)tz, _secondsFromGMTForAbsoluteTime:(CFAbsoluteTime)at);
     __CFGenericValidateType(tz, CFTimeZoneGetTypeID());
     idx = __CFBSearchTZPeriods(tz, at);
     return __CFTZPeriodGMTOffset(&(tz->_periods[idx]));
@@ -1550,6 +1556,9 @@ extern UCalendar *__CFCalendarCreateUCalendar(CFStringRef calendarID, CFStringRe
 CFStringRef CFTimeZoneCopyAbbreviation(CFTimeZoneRef tz, CFAbsoluteTime at) {
     CFStringRef result;
     CFIndex idx;
+    /* AGORA: and the same for this door -- it needs a COPY (+1), which is why the selector is named
+     * _copy... rather than _..., and why base must return a retained string. */
+    CF_OBJC_FUNCDISPATCHV(CFTimeZoneGetTypeID(), CFStringRef, (NSTimeZone *)tz, _copyAbbreviationForAbsoluteTime:(CFAbsoluteTime)at);
     __CFGenericValidateType(tz, CFTimeZoneGetTypeID());
 #if TARGET_OS_WIN32
     UErrorCode status = U_ZERO_ERROR;
@@ -1575,6 +1584,12 @@ CFStringRef CFTimeZoneCopyAbbreviation(CFTimeZoneRef tz, CFAbsoluteTime at) {
 }
 
 Boolean CFTimeZoneIsDaylightSavingTime(CFTimeZoneRef tz, CFAbsoluteTime at) {
+    /* AGORA: THE DISPATCH LINE THIS DOOR WAS MISSING. Same defect as CFArrayGetValueAtIndex: the
+ * assertion below EXEMPTS a bridged object and the door then reads Core Foundation's storage
+ * anyway -- measured as SIGSEGV with a Foundation NSTimeZone. The selector is the same
+ * ...ForAbsoluteTime: shape the two doors beside this one already use, because Core
+ * Foundation cannot make an NSDate. */
+    CF_OBJC_FUNCDISPATCHV(CFTimeZoneGetTypeID(), Boolean, (NSTimeZone *)tz, _isDaylightSavingTimeForAbsoluteTime:(CFAbsoluteTime)at);
     __CFGenericValidateType(tz, CFTimeZoneGetTypeID());
 #if TARGET_OS_WIN32
     UErrorCode status = U_ZERO_ERROR;

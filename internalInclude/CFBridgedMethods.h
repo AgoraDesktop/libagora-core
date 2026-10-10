@@ -47,6 +47,11 @@
 - (CFRange)_minimumRangeOfUnit:(NSCalendarUnit)unit;
 - (CFRange)_maximumRangeOfUnit:(NSCalendarUnit)unit;
 - (CFRange)_rangeOfUnit:(NSCalendarUnit)smallerUnit inUnit:(NSCalendarUnit)biggerUnit forAT:(CFAbsoluteTime)at;
+/* NSTimeZone: the three doors that read a zone's state at an instant. Core Foundation cannot make
+ * an NSDate, so the shape is ...ForAbsoluteTime:. */
+- (CFTimeInterval)_secondsFromGMTForAbsoluteTime:(CFAbsoluteTime)at;
+- (CFStringRef)_copyAbbreviationForAbsoluteTime:(CFAbsoluteTime)at;
+- (Boolean)_isDaylightSavingTimeForAbsoluteTime:(CFAbsoluteTime)at;
 /* NSTimer: CFRunLoop.c. */
 - (CFAbsoluteTime)_cffireTime;
 /* NSTimer: CFRunLoop.c. */
