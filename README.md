@@ -34,18 +34,20 @@ Build into `build/`, with **clang**, against the **system ICU** and the sibling
 **`libagora-dispatch`** component — which is a separate repository and is built on its own:
 
 ```sh
-# 1. build the sibling component first (its artefacts stay in its own build/)
+# 1. build and install the sibling component first (into its own build/)
 cmake -S ../libagora-dispatch -B ../libagora-dispatch/build \
       -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
 cmake --build ../libagora-dispatch/build
+cmake --install ../libagora-dispatch/build --prefix "$PWD/../build-prefix"
 
 # 2. build Core Foundation against it
-cmake -S . -B build -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+cmake -S . -B build -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+      -DCMAKE_PREFIX_PATH="$PWD/../build-prefix"
 cmake --build build
 ```
 
-- `libagora-dispatch` is found with `find_package(dispatch CONFIG)`; the default guess is
-  `../libagora-dispatch/build/cmake/modules`, override with `-Ddispatch_DIR=<dir>`.
+- `libagora-dispatch` is found with `find_package(dispatch CONFIG)` from that prefix (override with
+  `-Ddispatch_DIR=<dir>`).
 - The system ICU is used directly (Agora neither vendors ICU nor pins `swift-foundation-icu`); the
   `_foundation_unicode/` include prefix is recreated as a link to the system ICU headers.
 - The build is **Swift-free**: Core Foundation is compiled in its non-Swift (Objective-C)
