@@ -80,12 +80,19 @@ extern "C" {
 #define SystemIntegrityCheck(A, B)	do {} while (0)
 
 
-#if INCLUDE_OBJC
+/* AGORA: `__OBJC__` COUNTS AS INCLUDE_OBJC. The branch below is upstream's, and when it takes
+ * the C side it defines `id` and `Class` as `char *` -- which is right for a translation unit
+ * compiled as C and a redefinition of the runtime's own types in one compiled as Objective-C.
+ * Core Foundation's dispatch path needs some of its translation units to be Objective-C (see
+ * CFInternal.h), so the include branch is taken for both. The preprocessor guards that follow
+ * were already there and stay, so nothing about the C build changes. */
+#if INCLUDE_OBJC || defined(__OBJC__)
 #include <objc/objc.h>
 #else
 typedef signed char	BOOL; 
 typedef char * id;
 typedef char * Class;
+#endif
 #ifndef YES
 #define YES (BOOL)1
 #endif
@@ -95,6 +102,17 @@ typedef char * Class;
 #ifndef nil
 #define nil NULL
 #endif
+
+/* AGORA: THE CLASSES THE DISPATCH PATH MESSAGES. Core Foundation's doors cast to these and
+ * send them Apple's own selectors (see CFInternal.h), so an Objective-C translation unit needs
+ * the names. FORWARD DECLARATIONS AND NOT FOUNDATION'S HEADERS, which is the point: Core
+ * Foundation depends on the Objective-C RUNTIME and not on a Foundation implementation, so it
+ * can be given an NSArray by anything that bridges one -- Agora's libagora-base does, through
+ * `_CFRuntimeBridgeTypeToClass`. The list was measured, not guessed: it is the union of every
+ * name the sixteen dispatching translation units cast to. */
+#if defined(__OBJC__)
+@class NSArray, NSAttributedString, NSData, NSDate, NSDictionary, NSError;
+@class NSInputStream, NSMutableArray, NSMutableData, NSNumber, NSOutputStream, NSSet, NSURL;
 #endif
 
 #define CRSetCrashLogMessage(A) do {} while (0)

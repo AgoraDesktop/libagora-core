@@ -950,11 +950,46 @@ CF_INLINE uintptr_t __CFISAForTypeID(CFTypeID typeID) {
     }
 }
 
-#define CF_OBJC_FUNCDISPATCHV(typeID, obj, ...) do { } while (0)
-#define CF_OBJC_RETAINED_FUNCDISPATCHV(typeID, obj, ...) do { } while (0)
-#define CF_OBJC_CALLV(obj, ...) (0)
-#define CF_IS_OBJC(typeID, obj) (0)
 #define _CFTypeGetClass(obj) ((uintptr_t)((CFRuntimeBase *)obj)->_cfisa)
+
+/* ===========================================================================
+ * AGORA: THE OBJECTIVE-C DISPATCH PATH, RESTORED (2026-10-10).
+ *
+ * Upstream deleted it. Swift is the other side of Core Foundation there, so the
+ * bridge is a struct of C function pointers (`__CFSwiftBridge`, above) and the
+ * Objective-C macros below were left as the no-ops Apple's call sites still name.
+ * THE CALL SITES WERE NEVER TOUCHED: 172 `CF_OBJC_FUNCDISPATCHV` and 24
+ * `CF_OBJC_CALLV` across sixteen translation units are written in Apple's own
+ * Objective-C message syntax, and they only ever worked because a no-op macro
+ * discards its arguments before the compiler sees them. `(NSArray *)array` and
+ * `NSMakeRange(...)` are tokens nobody has parsed since.
+ *
+ * AGORA'S OTHER SIDE IS GENUINE OBJECTIVE-C, so the bridge is Apple's: a CF type
+ * is bridged to a class by `_CFRuntimeBridgeTypeToClass`, which stores the class
+ * in `__CFRuntimeObjCClassTable`, and `CF_IS_OBJC` is the question "is this
+ * object an instance of that class rather than a native Core Foundation object?".
+ * When it is, every door above dispatches to the Objective-C method and the CF
+ * object and the NS object ARE one object with one reference count.
+ *
+ * `CF_IS_OBJC` IS PLAIN C AND IS THEREFORE ALWAYS LIVE. The dispatch macros form
+ * a message send, so they need a translation unit compiled as Objective-C; where
+ * one is not, they stay the no-ops they were, which keeps a C-only Core
+ * Foundation building exactly as before.
+ * =========================================================================== */
+#define CF_IS_OBJC(typeID, obj) \
+    (__CFISAForTypeID(typeID) != 0 && _CFTypeGetClass(obj) == __CFISAForTypeID(typeID))
+
+#if defined(__OBJC__)
+#define CF_OBJC_FUNCDISPATCHV(typeID, ret, obj, ...) \
+    do { if (CF_IS_OBJC(typeID, obj)) return (ret)[(obj) __VA_ARGS__]; } while (0)
+#define CF_OBJC_RETAINED_FUNCDISPATCHV(typeID, ret, obj, ...) \
+    do { if (CF_IS_OBJC(typeID, obj)) return (ret)[(obj) __VA_ARGS__]; } while (0)
+#define CF_OBJC_CALLV(obj, ...) [(obj) __VA_ARGS__]
+#else
+#define CF_OBJC_FUNCDISPATCHV(typeID, ret, obj, ...) do { } while (0)
+#define CF_OBJC_RETAINED_FUNCDISPATCHV(typeID, ret, obj, ...) do { } while (0)
+#define CF_OBJC_CALLV(obj, ...) (0)
+#endif
 
 /* See comments in CFBase.c
 */
