@@ -579,6 +579,34 @@ static const cf_own_method cf_number_methods[] = {
 	{ NULL, NULL, NULL },
 };
 
+/* NSArray PRIMITIVES, AND THEY ARE EXACTLY TWO. Every concrete AGArray* class implements -count and
+ * -objectAtIndex: and nothing else of the collection surface -- AGArrayEmpty, AGArrayOne and
+ * AGArraySmall each define those two and inherit the other ~125 methods of NSArray. That is the cluster
+ * shape, so this is a one-step job.
+ *
+ * THE MUTABLE CASE IS NOT COVERED AND CANNOT BE FROM HERE: CFArrayRef and CFMutableArrayRef share ONE
+ * type id, so the owned class cannot tell them apart, and a CFMutableArrayRef would answer -addObject:
+ * with an inherited NSMutableArray implementation reading Core Foundation storage. Apple has
+ * __NSCFArray and __NSCFMutableArray and picks between them at CREATION -- which is what the `category`
+ * parameter of _CFRuntimeCreateInstance exists for, and CFArray.c passes NULL. */
+static unsigned long cf_imp_array_count(id self, SEL _cmd)
+{
+	(void)_cmd;
+	return (unsigned long)CFArrayGetCount((CFArrayRef)self);
+}
+
+static id cf_imp_array_object_at(id self, SEL _cmd, unsigned long idx)
+{
+	(void)_cmd;
+	return (id)CFArrayGetValueAtIndex((CFArrayRef)self, (CFIndex)idx);
+}
+
+static const cf_own_method cf_array_methods[] = {
+	{ "count", (IMP)cf_imp_array_count, "Q@:" },
+	{ "objectAtIndex:", (IMP)cf_imp_array_object_at, "@@:Q" },
+	{ NULL, NULL, NULL },
+};
+
 static const cf_own_method cf_string_methods[] = {
 	{ "length", (IMP)cf_imp_string_length, "Q@:" },
 	{ "characterAtIndex:", (IMP)cf_imp_string_char_at, "S@:Q" },
@@ -604,6 +632,7 @@ static const struct {
 	{ _kCFRuntimeIDCFString, "__NSCFString", cf_string_methods },
 	{ _kCFRuntimeIDCFDate,   "__NSCFDate",   cf_date_methods },
 	{ _kCFRuntimeIDCFNumber, "__NSCFNumber", cf_number_methods },
+	{ _kCFRuntimeIDCFArray,  "__NSCFArray",  cf_array_methods },
 	{ 0, NULL, NULL },
 };
 #endif /* __OBJC__ */
