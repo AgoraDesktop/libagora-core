@@ -2194,20 +2194,39 @@ CFIndex CFStringGetBytes(CFStringRef str, CFRange range, CFStringEncoding encodi
         return __CFSwiftBridge.NSString.__getBytes(str, encoding, range, buffer, maxBufLen, usedBufLen);
     }
 #endif
-    /* AGORA: THE DISPATCH LINE THIS DOOR WAS MISSING -- the fourth of its kind, after
-     * CFArrayGetValueAtIndex and three CFTimeZone doors. CfStringGetCharacters, its sibling four
-     * hundred lines down, has one; this did not, so it read CORE FOUNDATION STORAGE OUT OF A FOUNDATION
-     * STRING and memmove'd from __CFStrContents of an NSString. MEASURED, under gdb: SIGSEGV inside
-     * memmove, called from CFStringGetBytes from constructBuffers from _CFURLCreateWithURLString from
-     * CFURLCreateCopyAppendingPathComponent -- which is the CFURL decomposition family, and WHY THOSE
-     * THREE DOORS FAILED ONLY SOMETIMES: the pointer read is heap-dependent, so the crash depended on
-     * what happened to be there.
+    /* AGORA: THIS DOOR CANNOT USE THE DISPATCH MACRO, because it must NOT answer what Cocoa answers.
      *
-     * The selector is Cocoa own, and its shape is Foundation's -getBytes:maxLength:usedLength:encoding:
-     * options:range:remainingRange: with Core Foundation's lossByte and external-representation flags
-     * having no counterpart in it. */
-    CF_OBJC_FUNCDISPATCHV(_kCFRuntimeIDCFString, CFIndex, (NSString *)str,
-        getBytes:(uint8_t *)buffer maxLength:(NSUInteger)maxBufLen usedLength:(NSUInteger *)usedBufLen encoding:(NSUInteger)encoding options:0 range:NSMakeRange(range.location, range.length) remainingRange:NULL);
+     * CFStringGetBytes RETURNS A COUNT; Cocoa -getBytes:maxLength:usedLength:encoding:options:range:
+     * remainingRange: RETURNS A BOOL. So a macro of the form `return (ret)[...]` reads a BOOLEAN WHERE A
+     * BYTE COUNT BELONGS -- libobjc2 reported exactly that, method C against selector q, and COUNTING
+     * THE COMPLAINTS WAS NOT ENOUGH TO SEE IT because the number stayed at twenty-two while the CAUSE
+     * changed underneath. The probe that showed the arguments were fine printed the method encoding.
+     *
+     * THE COUNT IS WHAT COCOA REPORTS THROUGH usedLength:, so this calls it, takes the BOOL as a
+     * yes-or-no, and answers the length when the answer is yes. KNOWN EARLIER: this door was ALSO
+     * missing entirely, which is why so many CFURL doors crashed -- see CFURLCreateWithURLString and
+     * constructBuffers below, which call it on a Foundation string.
+     *
+     * The arguments are stated as the Cocoa method declares them (NSUInteger, not CFStringEncoding --
+     * a UInt32), because an argument list is not restricted to pointers the way a return value is. */
+    if (CF_IS_OBJC(_kCFRuntimeIDCFString, str)) {
+        NSUInteger used = 0;
+        Boolean ok = [(NSString *)str getBytes:(uint8_t *)buffer
+                                      maxLength:(NSUInteger)maxBufLen
+                                     usedLength:&used
+                                       encoding:(NSUInteger)encoding
+                                        options:isExternalRepresentation ? (NSUInteger)2 : (NSUInteger)0	/* 2 IS NSStringEncodingConversionExternalRepresentation, which is Foundation's NAME for a value Core Foundation cannot see; the hint is advisory */
+                                          range:NSMakeRange(range.location, range.length)
+                                 remainingRange:NULL];
+
+        if (!ok) {
+            return 0;
+        }
+        if (usedBufLen) {
+            *usedBufLen = (CFIndex)used;
+        }
+        return (CFIndex)used;
+    }
     /* THE ARGUMENTS ARE DECLARED AS THE COCOA METHOD DECLARES THEM, NOT AS Core Foundation SPELLS THEM.
      * CFStringEncoding is a UInt32 and NSStringEncoding is an NSUInteger, so libobjc2 reported the two
      * sides of this selector as 'incorrect signature' -- method ...I40Q44... against selector
