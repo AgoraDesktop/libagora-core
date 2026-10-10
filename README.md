@@ -9,7 +9,7 @@ directory (`../README.md`). `libagora-core` is the bottom layer of its stack.
 
 ## Provenance
 
-The C sources here are extracted verbatim from Apple's
+The C sources here are extracted from Apple's
 [swift-corelibs-foundation](https://github.com/swiftlang/swift-corelibs-foundation) — the
 cross-platform Foundation used by Swift on Linux and Windows.
 
@@ -18,7 +18,7 @@ cross-platform Foundation used by Swift on Linux and Windows.
 | Upstream | https://github.com/swiftlang/swift-corelibs-foundation |
 | Revision | `swift-6.4.0-RELEASE` (`d29d01ba165f6957141e07ea7fe8144ab491bc24`, 2026-08-18) |
 | Extracted subtree | `Sources/CoreFoundation/` |
-| Agora changes | none yet — the subtree is copied verbatim to this repository's root |
+| Agora changes | Swift toolchain integration removed — see [`PROVENANCE.md`](PROVENANCE.md) |
 
 The full record is in [`PROVENANCE.md`](PROVENANCE.md).
 
@@ -30,6 +30,8 @@ per-file headers are retained unchanged.
 
 ## Build
 
-**Not yet wired.** The upstream `CMakeLists.txt` kept at this root is entangled with the Swift
-build — it expects a Swift compiler, the `swift-foundation-icu` package, and libdispatch. A
-standalone build for Agora (against the system ICU and a vendored blocks runtime) is a later step.
+**Not yet wired.** Upstream's `CMakeLists.txt` at this root is entangled with the Swift build — it
+expects a Swift compiler, the `swift-foundation-icu` package, and libdispatch. The Swift module-map
+and `lib/swift` install pieces have been removed (see [`PROVENANCE.md`](PROVENANCE.md)); the ICU and
+libdispatch dependencies remain. A standalone build for Agora — against the system ICU and a vendored
+blocks runtime — is a later step.

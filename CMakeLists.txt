@@ -107,9 +107,6 @@ target_include_directories(CoreFoundation
     PRIVATE
         internalInclude)
 
-target_compile_options(CoreFoundation INTERFACE
-  "$<$<COMPILE_LANGUAGE:Swift>:SHELL:-Xcc -fmodule-map-file=${CMAKE_CURRENT_SOURCE_DIR}/include/module.modulemap>")
-
 target_compile_options(CoreFoundation PRIVATE
     "SHELL:$<$<COMPILE_LANGUAGE:C>:${_Foundation_common_build_flags}>")
 
@@ -135,20 +132,12 @@ file(COPY
     DESTINATION
         ${CMAKE_BINARY_DIR}/_CModulesForClients/CoreFoundation)
 
-if(NOT BUILD_SHARED_LIBS)
-    set(swift swift_static)
-else()
-    set(swift swift)
-endif()
-
 install(DIRECTORY
             include/
         DESTINATION
-            lib/${swift}/CoreFoundation)
+            include/CoreFoundation)
 
-if(NOT BUILD_SHARED_LIBS)
-    install(TARGETS CoreFoundation
-        ARCHIVE DESTINATION lib/swift_static/${SWIFT_SYSTEM_NAME}
-        LIBRARY DESTINATION lib/swift_static/${SWIFT_SYSTEM_NAME}
-        RUNTIME DESTINATION bin)
-endif()
+install(TARGETS CoreFoundation
+    ARCHIVE DESTINATION lib
+    LIBRARY DESTINATION lib
+    RUNTIME DESTINATION bin)
