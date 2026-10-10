@@ -87,6 +87,12 @@ file(CREATE_LINK "${_agora_icu_include_root}/unicode"
 
 # `_FoundationICU` — upstream's name for Core Foundation's ICU dependency,
 # backed here by the system ICU.
+# AGORA: EVERY LIBRARY IN THIS TREE IS SHARED. A consumer loads the whole .so, so an
+# Objective-C category in it is registered whether or not anything references its symbols
+# (a static archive drops such members and the categories silently stop answering) and a
+# single copy of the runtime state is shared instead of one per binary. See README.md.
+option(BUILD_SHARED_LIBS "Build shared libraries" ON)
+
 add_library(_FoundationICU INTERFACE)
 target_include_directories(_FoundationICU INTERFACE "$<BUILD_INTERFACE:${_agora_include_dir}>")
 target_link_libraries(_FoundationICU INTERFACE ICU::uc ICU::i18n ICU::data)
@@ -135,7 +141,7 @@ endif()
 # ---------------------------------------------------------------------------
 # The Core Foundation library.
 # ---------------------------------------------------------------------------
-add_library(CoreFoundation STATIC
+add_library(CoreFoundation SHARED
     CFApplicationPreferences.c
     CFArray.c
     CFAttributedString.c
