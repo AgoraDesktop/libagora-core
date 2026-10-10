@@ -2194,6 +2194,21 @@ CFIndex CFStringGetBytes(CFStringRef str, CFRange range, CFStringEncoding encodi
         return __CFSwiftBridge.NSString.__getBytes(str, encoding, range, buffer, maxBufLen, usedBufLen);
     }
 #endif
+    /* AGORA: THE DISPATCH LINE THIS DOOR WAS MISSING -- the fourth of its kind, after
+     * CFArrayGetValueAtIndex and three CFTimeZone doors. CfStringGetCharacters, its sibling four
+     * hundred lines down, has one; this did not, so it read CORE FOUNDATION STORAGE OUT OF A FOUNDATION
+     * STRING and memmove'd from __CFStrContents of an NSString. MEASURED, under gdb: SIGSEGV inside
+     * memmove, called from CFStringGetBytes from constructBuffers from _CFURLCreateWithURLString from
+     * CFURLCreateCopyAppendingPathComponent -- which is the CFURL decomposition family, and WHY THOSE
+     * THREE DOORS FAILED ONLY SOMETIMES: the pointer read is heap-dependent, so the crash depended on
+     * what happened to be there.
+     *
+     * The selector is Cocoa own, and its shape is Foundation's -getBytes:maxLength:usedLength:encoding:
+     * options:range:remainingRange: with Core Foundation's lossByte and external-representation flags
+     * having no counterpart in it. */
+    CF_OBJC_FUNCDISPATCHV(_kCFRuntimeIDCFString, CFIndex, (NSString *)str,
+        getBytes:(uint8_t *)buffer maxLength:(NSUInteger)maxBufLen usedLength:(NSUInteger *)usedBufLen encoding:(CFStringEncoding)encoding options:0 range:NSMakeRange(range.location, range.length) remainingRange:NULL);
+
     __CFAssertIsNotNegative(maxBufLen);
     
     {
