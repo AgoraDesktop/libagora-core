@@ -43,7 +43,7 @@ cmake --build build
   `CMakeLists.txt` to use an already-installed libdispatch via `find_package(dispatch CONFIG)`.
 - The system ICU is used directly (Agora neither vendors ICU nor pins `swift-foundation-icu`); the
   `_foundation_unicode/` include prefix is recreated as a link to the system ICU headers.
-- The build produces the static library `libCoreFoundation.a`. It compiles cleanly with clang; GCC is
+- The build produces the static library `libagora-core.a`. It compiles cleanly with clang; GCC is
   not a supported compiler.
 
 See [`PROVENANCE.md`](PROVENANCE.md) for how this differs from upstream's Swift-based build.

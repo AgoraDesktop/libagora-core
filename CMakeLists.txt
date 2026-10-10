@@ -218,6 +218,10 @@ add_library(CoreFoundation STATIC
     CFWindowsUtilities.c
     CFXMLPreferencesDomain.c
     uuid.c)
+
+# The artifact is Agora's: libagora-core.a (the CMake target keeps upstream's name).
+set_target_properties(CoreFoundation PROPERTIES OUTPUT_NAME agora-core)
+
 target_compile_definitions(CoreFoundation PRIVATE
   $<$<AND:$<PLATFORM_ID:Windows>,$<NOT:$<BOOL:${BUILD_SHARED_LIBS}>>>:CF_WINDOWS_EXECUTABLE_INITIALIZER>)
 target_include_directories(CoreFoundation

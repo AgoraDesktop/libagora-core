@@ -63,9 +63,12 @@ and the `dispatch` dependency. `CMakeLists.txt` is now Agora's own top-level bui
   and private headers as `dispatch/*.h`, plus its `os/*.h`, which is the layout Core Foundation's
   sources expect;
 - **`_Foundation_common_build_flags`** — defined for the C sources, with only the Swift-specific
-  entries dropped.
+  entries dropped;
+- **the artifact name** — the static library is built as `libagora-core.a`
+  (`set_target_properties(CoreFoundation PROPERTIES OUTPUT_NAME agora-core)`); the CMake target keeps
+  upstream's name, `CoreFoundation`.
 
-Verified to compile cleanly with clang into `libCoreFoundation.a`.
+Verified to compile cleanly with clang into `libagora-core.a`.
 
 ## Licence and attribution
 
