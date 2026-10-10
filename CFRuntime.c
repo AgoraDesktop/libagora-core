@@ -453,21 +453,116 @@ static const char *cf_imp_string_utf8(id self, SEL _cmd)
 	(void)_cmd;
 	return CFStringGetCStringPtr((CFStringRef)self, kCFStringEncodingUTF8);
 }
+
+/* ---------------------------------------------------------------------------
+ * THE TABLE OF CORE FOUNDATION-OWNED CLASSES, AND THE LESSON IS THAT IT IS SHORT.
+ *
+ * Foundation's classes are CLUSTERS, and the method counts look alarming until you read where they
+ * live: NSArray implements 127 methods, but its concrete classes implement almost none -- AGArrayEmpty
+ * 8, AGArrayItems 1, AGArrayMutable 0 -- because THE OTHER ~110 RIDE ON THE PRIMITIVES. A Core
+ * Foundation-owned class therefore needs ONLY THE PRIMITIVES, and inherits the derived ones, which is
+ * exactly the arrangement Apple relies on. The real cost is Core Foundation's own dispatch list, not
+ * Foundation's public API.
+ *
+ * EVERY IMP CALLS CORE FOUNDATION'S DOOR FOR THAT METHOD, and it cannot recurse: _CFIsObjC refuses this
+ * class, so the door takes its native path. THE ENCODING MUST MATCH THE METHOD IT REPLACES -- measured,
+ * twice, as libobjc2's 'incorrect signature' -- and a wrong one is a silently wrong answer rather than a
+ * loud failure, which is how -_secondsFromGMTForAbsoluteTime: returning NSInteger cost an afternoon.
+ * ------------------------------------------------------------------------- */
+/* ---------------------------------------------------------------------------
+ * THE TABLE OF CORE FOUNDATION-OWNED CLASSES, AND THE LESSON IS THAT IT IS SHORT.
+ *
+ * Foundation classes are CLUSTERS, and their method counts look alarming until you read where the
+ * methods live: NSArray implements 127, but its concrete classes implement almost none -- AGArrayEmpty
+ * 8, AGArrayItems 1, AGArrayMutable 0 -- BECAUSE THE OTHER ~110 RIDE ON THE PRIMITIVES. A Core
+ * Foundation-owned class therefore needs ONLY THE PRIMITIVES and inherits the derived ones, which is the
+ * arrangement Apple relies on. The real cost is Core Foundation own dispatch list, not Foundation API.
+ *
+ * EVERY IMP CALLS CORE FOUNDATION DOOR FOR THAT METHOD, and it cannot recurse: _CFIsObjC refuses this
+ * class, so the door takes its native path. THE ENCODING MUST MATCH THE METHOD IT REPLACES -- measured
+ * twice as libobjc2 'incorrect signature', and a wrong one gives a silently wrong answer rather than a
+ * loud failure, which is how -_secondsFromGMTForAbsoluteTime: returning NSInteger cost an afternoon.
+ *
+ * SELECTORS ARE NAMED, NOT @selector()d: @selector is a call to sel_registerName and cannot appear in a
+ * static initialiser, so the table holds names and cf_bridged_subclass registers them.
+ * ------------------------------------------------------------------------- */
+typedef struct {
+	const char *name;
+	IMP imp;
+	const char *types;
+} cf_own_method;
+
+static double cf_imp_date_absolute_time(id self, SEL _cmd)
+{
+	(void)_cmd;
+	return (double)CFDateGetAbsoluteTime((CFDateRef)self);
+}
+
+static double cf_imp_date_since(id self, SEL _cmd, id other)
+{
+	(void)_cmd;
+	return (double)CFDateGetTimeIntervalSinceDate((CFDateRef)self, (CFDateRef)other);
+}
+
+static long cf_imp_date_compare(id self, SEL _cmd, id other)
+{
+	(void)_cmd;
+	return (long)CFDateCompare((CFDateRef)self, (CFDateRef)other, NULL);
+}
+
+static const cf_own_method cf_string_methods[] = {
+	{ "length", (IMP)cf_imp_string_length, "Q@:" },
+	{ "characterAtIndex:", (IMP)cf_imp_string_char_at, "S@:Q" },
+	{ "UTF8String", (IMP)cf_imp_string_utf8, "*@:" },
+	{ NULL, NULL, NULL },
+};
+
+static const cf_own_method cf_date_methods[] = {
+	{ "timeIntervalSinceReferenceDate", (IMP)cf_imp_date_absolute_time, "d@:" },
+	{ "timeIntervalSinceDate:", (IMP)cf_imp_date_since, "d@:@" },
+	{ "compare:", (IMP)cf_imp_date_compare, "q@:@" },
+	{ NULL, NULL, NULL },
+};
+
+/* One row per type that has been given an owned class. CFDate is here because it is the cheapest real
+ * one at three methods; the rest of the registered types still wear no class, which is why handing one
+ * to Foundation segfaults and why the suite now says so out loud. */
+static const struct {
+	CFTypeID type;
+	const char *name;
+	const cf_own_method *methods;
+} cf_own_classes[] = {
+	{ _kCFRuntimeIDCFString, "__NSCFString", cf_string_methods },
+	{ _kCFRuntimeIDCFDate,   "__NSCFDate",   cf_date_methods },
+	{ 0, NULL, NULL },
+};
 #endif /* __OBJC__ */
 
 #if defined(__OBJC__)
+extern SEL sel_registerName(const char *name);
+
 static uintptr_t cf_bridged_subclass(CFTypeID typeID, const void *cls_ref)
 {
-	const char *name = typeID == _kCFRuntimeIDCFString ? "__NSCFString" : "__CFBridged";
-	Class sub = objc_allocateClassPair((Class)cls_ref, name, 0);
+	const cf_own_method *methods = NULL;
+	const char *name = NULL;
+	Class sub;
 
+	for (size_t i = 0; cf_own_classes[i].name != NULL; i++) {
+		if (cf_own_classes[i].type == typeID) {
+			name = cf_own_classes[i].name;
+			methods = cf_own_classes[i].methods;
+			break;
+		}
+	}
+	if (name == NULL) {
+		return 0;	/* not a type that has an owned class yet */
+	}
+	sub = objc_allocateClassPair((Class)cls_ref, name, 0);
 	if (sub == NULL) {
 		return 0;	/* the name is taken by a previous registration: keep what we have */
 	}
-	if (typeID == _kCFRuntimeIDCFString) {
-		class_addMethod(sub, @selector(length), (IMP)cf_imp_string_length, "Q@:");
-		class_addMethod(sub, @selector(characterAtIndex:), (IMP)cf_imp_string_char_at, "S@:Q");
-		class_addMethod(sub, @selector(UTF8String), (IMP)cf_imp_string_utf8, "*@:");
+	for (size_t i = 0; methods != NULL && methods[i].name != NULL; i++) {
+		class_addMethod(sub, sel_registerName(methods[i].name), methods[i].imp, methods[i].types);
 	}
 	objc_registerClassPair(sub);
 	return (uintptr_t)sub;
@@ -536,7 +631,7 @@ void _CFRuntimeBridgeTypeToClass(CFTypeID cf_typeID, const void *cls_ref) {
     /* AND CORE FOUNDATION MAKES ITS OWN CLASS FROM IT -- see cf_bridged_subclass below. Both go in the
      * same lock, because a registration that installed the class but not Core Foundation's own would be
      * a window in which a created object wears the wrong one. */
-    if (cf_typeID == _kCFRuntimeIDCFString && cls_ref != NULL && __CFRuntimeCFOwnClassTable[cf_typeID] == 0) {
+    if (cls_ref != NULL && __CFRuntimeCFOwnClassTable[cf_typeID] == 0) {
         __CFRuntimeCFOwnClassTable[cf_typeID] = cf_bridged_subclass(cf_typeID, cls_ref);
     }
 #endif
