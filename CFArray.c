@@ -507,6 +507,16 @@ Boolean CFArrayContainsValue(CFArrayRef array, CFRange range, const void *value)
 }
 
 const void *CFArrayGetValueAtIndex(CFArrayRef array, CFIndex idx) {
+    /* AGORA: THE DISPATCH LINE THIS DOOR WAS MISSING. Nine of CFArray's ten doors carry one and those
+     * nine are exactly the doors that work; this one fell straight through to
+     * _CFArrayCheckAndGetValueAtIndex, which reads CORE FOUNDATION'S STORAGE out of a Foundation array.
+     * Measured before: CFArrayGetValueAtIndex returned 0x31 for an NSMutableArray holding @"one" --
+     * a fragment of the tagged pointer's bits -- while -objectAtIndex: returned the tagged pointer.
+     *
+     * It was SILENT because __CFGenericValidateType, the typed assertion above, EXEMPTS a bridged object
+     * (`if (cf && CF_IS_OBJC(type, cf)) return;`) and then the door went on to treat it as one anyway.
+     * The exemption is right; the missing dispatch is the bug. */
+    CF_OBJC_FUNCDISPATCHV(CFArrayGetTypeID(), const void *, (NSArray *)array, objectAtIndex:(NSUInteger)idx);
     CF_SWIFT_FUNCDISPATCHV(CFArrayGetTypeID(), const void *, (CFSwiftRef)array, NSArray.objectAtIndex, idx);
     
     
