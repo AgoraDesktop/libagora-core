@@ -364,6 +364,13 @@ extern void *object_getClass(void *obj);
  * _CFRuntimeCreateInstance), so its _cfisa is 0 and object_getClass answers NULL; a Foundation object has
  * an isa, and a small object has tag bits the runtime decodes. Measured: kCFBooleanTrue's word 0 is 0
  * while its cfinfoa sits at word 1, so the two can never be confused for one another. */
+/* THE CLASS CORE FOUNDATION MADE FOR ITSELF, per type id, alongside the class Foundation registered.
+ * Two tables because the two questions are different ones: CF_IS_OBJC asks about Foundation's cluster,
+ * _CFRuntimeCreateInstance asks what a Core Foundation object should wear. */
+#if defined(__OBJC__)
+static uintptr_t __CFRuntimeCFOwnClassTable[__CFRuntimeClassTableSize];
+#endif
+
 CF_PRIVATE Boolean _CFIsAnObject(const void *obj) {
     return obj != NULL && object_getClass((void *)obj) != NULL;
 }
@@ -395,6 +402,64 @@ CF_PRIVATE CFTypeID _CFBridgedTypeIDForObject(const void *obj) {
     return _kCFRuntimeNotATypeID;
 }
 
+#if defined(__OBJC__)
+/* AGORA: A CORE FOUNDATION OBJECT WEARS A CORE FOUNDATION CLASS -- the last piece of the bridge, and
+ * Apple's own answer to a problem this file created twice.
+ *
+ * It cannot wear FOUNDATION'S class: CFArrayCreate would come back as an NSArray and CFArrayAppendValue
+ * would dispatch into an immutable one. It cannot wear NO class either, which is where this stood until
+ * now: measured as SIGSEGV in CFEqual(@"same", aNativeCFString), because Foundation's -isEqual: receives
+ * the Core Foundation object as an ARGUMENT and has nothing to message.
+ *
+ * SO IT WEARS A SUBCLASS OF FOUNDATION'S, MADE BY THE RUNTIME AND OWNED BY CORE FOUNDATION, WHOSE METHODS
+ * ARE CORE FOUNDATION'S OWN. That is Apple's __NSCFString, and it works here because
+ * objc_allocateClassPair takes the class Foundation handed over and class_addMethod takes a C function --
+ * verified before any of this was written. Three consequences, all intended:
+ *   - a Core Foundation string IS an NSString, so Foundation's -isEqual: can read it;
+ *   - its -length is Core Foundation's CFStringGetLength, which does NOT recurse, because _CFIsObjC
+ *     refuses this class exactly as it refuses no class at all;
+ *   - CFArrayAppendValue still reaches Core Foundation, because the class provides Core Foundation's
+ *     implementation rather than Foundation's.
+ *
+ * THE MINIMUM METHOD SET IS MEASURED, NOT GUESSED: -length and -characterAtIndex: are what Foundation's
+ * -isEqual: actually sends to its argument, and the probe that established the mechanism also established
+ * that the encoding must match the method being replaced -- Q@: for -length, S@:Q for -characterAtIndex:.
+ * libobjc2 reports 'incorrect signature' when it does not match, rather than failing silently. */
+extern Class objc_allocateClassPair(Class superclass, const char *name, size_t extraBytes);
+extern BOOL class_addMethod(Class cls, SEL name, IMP imp, const char *types);
+extern void objc_registerClassPair(Class cls);
+
+static unsigned long cf_imp_string_length(id self, SEL _cmd)
+{
+	(void)_cmd;
+	return (unsigned long)CFStringGetLength((CFStringRef)self);
+}
+
+static unsigned short cf_imp_string_char_at(id self, SEL _cmd, unsigned long index)
+{
+	(void)_cmd;
+	return (unsigned short)CFStringGetCharacterAtIndex((CFStringRef)self, (CFIndex)index);
+}
+#endif /* __OBJC__ */
+
+#if defined(__OBJC__)
+static uintptr_t cf_bridged_subclass(CFTypeID typeID, const void *cls_ref)
+{
+	const char *name = typeID == _kCFRuntimeIDCFString ? "__NSCFString" : "__CFBridged";
+	Class sub = objc_allocateClassPair((Class)cls_ref, name, 0);
+
+	if (sub == NULL) {
+		return 0;	/* the name is taken by a previous registration: keep what we have */
+	}
+	if (typeID == _kCFRuntimeIDCFString) {
+		class_addMethod(sub, @selector(length), (IMP)cf_imp_string_length, "Q@:");
+		class_addMethod(sub, @selector(characterAtIndex:), (IMP)cf_imp_string_char_at, "S@:Q");
+	}
+	objc_registerClassPair(sub);
+	return (uintptr_t)sub;
+}
+#endif
+
 Boolean _CFIsObjC(CFTypeID typeID, void *obj) {
     uintptr_t want, cls;
 
@@ -405,6 +470,14 @@ Boolean _CFIsObjC(CFTypeID typeID, void *obj) {
     if (want == 0) {
         return false;	/* this type is not bridged to a class at all */
     }
+#if defined(__OBJC__)
+    /* A CORE FOUNDATION OBJECT IS NOT A BRIDGED OBJECT, even though it is a subclass of one. Its methods
+     * ARE Core Foundation's, so dispatching to them would be Core Foundation asking itself -- the
+     * recursion that would follow from -length calling CFStringGetLength. */
+    if (__CFRuntimeCFOwnClassTable[typeID] != 0 && (uintptr_t)object_getClass((void *)obj) == __CFRuntimeCFOwnClassTable[typeID]) {
+        return false;
+    }
+#endif
     for (cls = (uintptr_t)object_getClass(obj); cls != 0; cls = (uintptr_t)class_getSuperclass((void *)cls)) {
         if (cls == want) {
             return true;
@@ -682,7 +755,13 @@ CFTypeRef _CFRuntimeCreateInstance(CFAllocatorRef allocator, CFTypeID typeID, CF
      * Agora has no such class, so a CF object wears none, which is what kCFBooleanTrue has always done
      * and what CF_IS_OBJC already handles (a zero class is not an object). Foundation's objects keep
      * their own isas and are still recognised, by the chain walk in _CFIsObjC. */
+#if defined(__OBJC__)
+    /* A CORE FOUNDATION OBJECT WEARS CORE FOUNDATION'S CLASS FOR ITS TYPE, or none when the type has not
+     * been bridged -- kCFBooleanTrue's isa has always been 0. */
+    memory->_cfisa = __CFRuntimeCFOwnClassTable[typeID];
+#else
     memory->_cfisa = 0;
+#endif
     if (NULL != cls->init) {
 	(cls->init)(memory);
     }
