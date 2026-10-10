@@ -25,7 +25,7 @@
 
 cmake_minimum_required(VERSION 3.24)
 
-project(AgoraCore LANGUAGES C)
+project(AgoraCore LANGUAGES C OBJC)
 
 include(GNUInstallDirs)
 include(CheckSymbolExists)
@@ -49,6 +49,7 @@ endif()
 
 find_package(Threads REQUIRED)
 find_package(dispatch CONFIG REQUIRED)
+find_package(libobjc CONFIG REQUIRED)
 
 # ---------------------------------------------------------------------------
 # Include shim: the header layout Core Foundation's sources expect.
@@ -241,14 +242,49 @@ target_include_directories(CoreFoundation
     PRIVATE
         internalInclude)
 
+# ---------------------------------------------------------------------------
+# THE OBJECTIVE-C DISPATCH PATH. Core Foundation's doors dispatch to bridged
+# Objective-C objects (CFInternal.h), and the 172 CF_OBJC_FUNCDISPATCHV and 24
+# CF_OBJC_CALLV call sites below are written in Apple's message syntax -- they
+# only ever compiled because the macros were no-ops that discarded their
+# arguments before the compiler parsed them. Restoring the path means those
+# translation units are Objective-C: EXACTLY THOSE, not the library. The rest,
+# including the ICU converters and the platform layer, stay C, and the dispatch
+# macros stay no-ops in them.
+#
+# The names are matched against the target's own SOURCES so the property lands on
+# the same file CMake is compiling, whichever way the list was written.
+# ---------------------------------------------------------------------------
+set(_cf_objc_dispatch_sources
+    CFArray.c CFAttributedString.c CFCalendar.c CFCharacterSet.c CFData.c CFDate.c
+    CFDictionary.c CFError.c CFLocale.c CFNumber.c CFRunLoop.c CFSet.c CFStream.c
+    CFString.c CFTimeZone.c CFURL.c)
+
+get_target_property(_cf_sources CoreFoundation SOURCES)
+foreach(_cf_src IN LISTS _cf_sources)
+    get_filename_component(_cf_name "${_cf_src}" NAME)
+    if(_cf_name IN_LIST _cf_objc_dispatch_sources)
+        set_source_files_properties("${_cf_src}" PROPERTIES LANGUAGE OBJC)
+    endif()
+endforeach()
+
 target_compile_options(CoreFoundation PRIVATE
-    "SHELL:$<$<COMPILE_LANGUAGE:C>:${_Foundation_common_build_flags}>")
+    "$<$<COMPILE_LANGUAGE:OBJC>:-fobjc-runtime=gnustep-2.0>"
+    "$<$<COMPILE_LANGUAGE:OBJC>:-fblocks>")
+target_link_libraries(CoreFoundation PRIVATE objc)
+
+target_compile_options(CoreFoundation PRIVATE
+    # AGORA: OBJC TOO. These flags carry -DCF_BUILDING_CF and -DCF_HAS_... and the
+# dispatch translation units are Objective-C now, so gating them on C alone'
+# leaves those units without the build defines -- CFInternal.h refuses to be
+# included without CF_BUILDING_CF, which is how this was found.
+    "SHELL:$<$<COMPILE_LANGUAGE:C,OBJC>:${_Foundation_common_build_flags}>")
 
 # Core Foundation's headers use blocks, and CFSTR is a compile-time constant, so a
 # consumer needs these too: make them part of the usage requirements.
 target_compile_options(CoreFoundation INTERFACE
-    "$<$<COMPILE_LANGUAGE:C,CXX>:-fblocks>"
-    "$<$<COMPILE_LANGUAGE:C,CXX>:-fconstant-cfstrings>")
+    "$<$<COMPILE_LANGUAGE:C,CXX,OBJC>:-fblocks>"
+    "$<$<COMPILE_LANGUAGE:C,CXX,OBJC>:-fconstant-cfstrings>")
 
 target_precompile_headers(CoreFoundation PRIVATE internalInclude/CoreFoundation_Prefix.h)
 
