@@ -47,6 +47,12 @@
 - (CFRange)_minimumRangeOfUnit:(NSCalendarUnit)unit;
 - (CFRange)_maximumRangeOfUnit:(NSCalendarUnit)unit;
 - (CFRange)_rangeOfUnit:(NSCalendarUnit)smallerUnit inUnit:(NSCalendarUnit)biggerUnit forAT:(CFAbsoluteTime)at;
+/* NSString, the fast paths: both are ALLOWED TO SAY NO with NULL, and CFString.c falls back. */
+- (const char *)_fastCStringContents:(Boolean)nullTerminated;
+- (const UniChar *)_fastCharacterContents;
+- (Boolean)_encodingCantBeStoredInEightBitCFString;
+/* NSURL: the true CFURL behind it, which _CFURLFromNSURL is the only caller of. */
+- (CFURLRef)_cfurl;
 /* NSTimeZone: the three doors that read a zone's state at an instant. Core Foundation cannot make
  * an NSDate, so the shape is ...ForAbsoluteTime:. */
 - (CFTimeInterval)_secondsFromGMTForAbsoluteTime:(CFAbsoluteTime)at;
