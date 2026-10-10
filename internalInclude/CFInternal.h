@@ -164,6 +164,9 @@ typedef struct os_log_s *os_log_t;
 
 #include "ForFoundationOnly.h"
 #include "ForSwiftFoundationOnly.h"
+
+/* The Objective-C spellings of the values the dispatch path passes (CFBridgingTypes.h). */
+#include "CFBridgingTypes.h"
 #include "CFString.h"
 
 CF_EXPORT const char *_CFProcessName(void);

@@ -113,6 +113,8 @@ typedef char * Class;
 #if defined(__OBJC__)
 @class NSArray, NSAttributedString, NSData, NSDate, NSDictionary, NSError;
 @class NSInputStream, NSMutableArray, NSMutableData, NSNumber, NSOutputStream, NSSet, NSURL;
+@class NSCalendar, NSCharacterSet, NSLocale, NSMutableDictionary, NSMutableSet, NSTimeZone;
+@class NSString, NSMutableString, NSMutableAttributedString;
 #endif
 
 #define CRSetCrashLogMessage(A) do {} while (0)
