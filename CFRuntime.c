@@ -324,6 +324,19 @@ void *__CFConstantStringClassReferencePtr = NULL;
  */
 extern void *class_getSuperclass(void *cls);
 
+/* THE RUNTIME'S OWN ACCESSOR, AND READING THE ISA DIRECTLY IS WHAT IT REPLACES. A SMALL OBJECT -- a
+ * tagged pointer, which is what a short @"..." literal is -- has no isa at all: libobjc2's
+ * isSmallObject() is `(addr & OBJC_SMALL_OBJECT_MASK) != 0` (mask 7 on 64-bit) and the class is looked
+ * up from the pointer's tag bits instead. Reading offset 0 of such a pointer dereferences
+ * 0xd19766cde000002c and dies, which is exactly the crash this replaced: measured in _CFIsObjC at
+ * `mov (%rsi),%rax`, with the pointer in %rbx.
+ *
+ * object_getClass is what the runtime's own header recommends over reading isa, and it decodes both
+ * shapes. The chain walk stays because libagora-base is a cluster, and both accessors are declared here
+ * rather than included because this translation unit is C and Core Foundation's own build gives its C
+ * units `id` as `char *` -- which the runtime's header would redefine. */
+extern void *object_getClass(void *obj);
+
 Boolean _CFIsObjC(CFTypeID typeID, void *obj) {
     uintptr_t want, cls;
 
@@ -334,7 +347,7 @@ Boolean _CFIsObjC(CFTypeID typeID, void *obj) {
     if (want == 0) {
         return false;	/* this type is not bridged to a class at all */
     }
-    for (cls = _CFTypeGetClass(obj); cls != 0; cls = (uintptr_t)class_getSuperclass((void *)cls)) {
+    for (cls = (uintptr_t)object_getClass(obj); cls != 0; cls = (uintptr_t)class_getSuperclass((void *)cls)) {
         if (cls == want) {
             return true;
         }
