@@ -50,6 +50,18 @@ static inline NSUInteger NSMaxRange(NSRange range)
 	return range.location + range.length;
 }
 
+/* THE OPTION AND ENUM TYPES, AS INTEGER TYPEDEFS RATHER THAN `typedef enum { ... } Name`.
+ * That is Apple's own arrangement -- `NS_OPTIONS(NSUInteger, NSCalendarUnit)` and
+ * `NS_ENUM(NSInteger, NSTimeZoneNameStyle)` both resolve to a plain integer typedef with the
+ * members declared apart from it -- and it is what lets the TYPE be named wherever the bridge
+ * crosses while the MEMBERS stay Foundation's. Foundation's headers import this one and keep
+ * their constants. */
+typedef unsigned short unichar;		/* the UTF-16 code unit, Foundation's spelling */
+
+typedef unsigned long NSCalendarUnit;		/* NS_OPTIONS(NSUInteger, ...) */
+typedef unsigned long NSStringCompareOptions;	/* NS_OPTIONS(NSUInteger, ...) */
+typedef NSInteger NSTimeZoneNameStyle;		/* NS_ENUM(NSInteger, ...) */
+
 #endif /* __OBJC__ */
 
 #endif /* COREFOUNDATION_CFBRIDGINGTYPES_H */

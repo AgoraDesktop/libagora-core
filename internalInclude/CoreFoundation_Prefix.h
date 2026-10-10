@@ -115,6 +115,7 @@ typedef char * Class;
 @class NSInputStream, NSMutableArray, NSMutableData, NSNumber, NSOutputStream, NSSet, NSURL;
 @class NSCalendar, NSCharacterSet, NSLocale, NSMutableDictionary, NSMutableSet, NSTimeZone;
 @class NSString, NSMutableString, NSMutableAttributedString;
+@class NSMutableCharacterSet;
 #endif
 
 #define CRSetCrashLogMessage(A) do {} while (0)
