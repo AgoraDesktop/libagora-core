@@ -32,6 +32,12 @@ per-file headers are retained unchanged.
 
 **Not yet wired.** Upstream's `CMakeLists.txt` at this root is entangled with the Swift build — it
 expects a Swift compiler, the `swift-foundation-icu` package, and libdispatch. The Swift module-map
-and `lib/swift` install pieces have been removed (see [`PROVENANCE.md`](PROVENANCE.md)); the ICU and
-libdispatch dependencies remain. A standalone build for Agora — against the system ICU and a vendored
-blocks runtime — is a later step.
+and `lib/swift` install pieces have been removed (see [`PROVENANCE.md`](PROVENANCE.md)).
+
+When wired, the build will:
+
+- use the **system ICU** directly (Agora neither vendors ICU nor pins `swift-foundation-icu`); and
+- take its dispatch runtime and blocks runtime from the sibling **`libagora-dispatch`** component
+  rather than a vendored copy — `libagora-core` keeps only its WASI-only `BlockRuntime/` fallback.
+
+Wiring the standalone build is a later step.
