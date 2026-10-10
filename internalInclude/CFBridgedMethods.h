@@ -47,6 +47,10 @@
 - (CFRange)_minimumRangeOfUnit:(NSCalendarUnit)unit;
 - (CFRange)_maximumRangeOfUnit:(NSCalendarUnit)unit;
 - (CFRange)_rangeOfUnit:(NSCalendarUnit)smallerUnit inUnit:(NSCalendarUnit)biggerUnit forAT:(CFAbsoluteTime)at;
+/* NSTimer: CFRunLoop.c. */
+- (CFAbsoluteTime)_cffireTime;
+/* NSTimer: CFRunLoop.c. */
+- (CFTimeInterval)timeInterval;
 /* NSInputStream and NSOutputStream: CFStream.c, answering the stream error struct. */
 - (CFStreamError)_cfStreamError;
 @end
