@@ -510,6 +510,75 @@ static long cf_imp_date_compare(id self, SEL _cmd, id other)
 	return (long)CFDateCompare((CFDateRef)self, (CFDateRef)other, NULL);
 }
 
+/* NSNumber PRIMITIVES, AND IT NEEDED NO REFACTOR -- unlike NSDate, whose methods read the ivar
+ * _timeIntervalSince1970 and could therefore inherit nothing. base NSNumber has ZERO ivar mentions in
+ * the abstract class and five concrete AGNumber* classes each implementing the same four methods, which
+ * IS the cluster shape. So this is a one-step job, and the four are exactly the concrete set:
+ *
+ *   -agKind                 the @encode char of the type it was built as, WHICH IS THE DISCRIMINATOR
+ *                           every conversion in the abstract class switches on: unsigned kinds take
+ *                           -unsignedLongLongValue, 'f' and 'd' take -doubleValue, the rest
+ *                           -longLongValue. Get this wrong and fifteen conversions are wrong.
+ *   -longLongValue
+ *   -unsignedLongLongValue
+ *   -doubleValue
+ */
+static unsigned char cf_imp_number_kind(id self, SEL _cmd)
+{
+	(void)_cmd;
+	switch (CFNumberGetType((CFNumberRef)self)) {
+	case kCFNumberSInt8Type:	return (unsigned char)'c';
+	case kCFNumberSInt16Type:	return (unsigned char)'s';
+	case kCFNumberSInt32Type:	return (unsigned char)'i';
+	case kCFNumberSInt64Type:	return (unsigned char)'q';
+	case kCFNumberFloat32Type:	return (unsigned char)'f';
+	case kCFNumberFloat64Type:	return (unsigned char)'d';
+	case kCFNumberCharType:		return (unsigned char)'C';
+	case kCFNumberShortType:	return (unsigned char)'S';
+	case kCFNumberIntType:		return (unsigned char)'I';
+	case kCFNumberLongType:		return (unsigned char)'L';
+	case kCFNumberLongLongType:	return (unsigned char)'Q';
+	case kCFNumberFloatType:	return (unsigned char)'f';
+	case kCFNumberDoubleType:	return (unsigned char)'d';
+	default:			return (unsigned char)'q';
+	}
+}
+
+static long long cf_imp_number_ll(id self, SEL _cmd)
+{
+	long long v = 0;
+
+	(void)_cmd;
+	CFNumberGetValue((CFNumberRef)self, kCFNumberSInt64Type, &v);
+	return v;
+}
+
+static unsigned long long cf_imp_number_ull(id self, SEL _cmd)
+{
+	long long v = 0;
+
+	(void)_cmd;
+	CFNumberGetValue((CFNumberRef)self, kCFNumberSInt64Type, &v);
+	return (unsigned long long)v;
+}
+
+static double cf_imp_number_double(id self, SEL _cmd)
+{
+	double v = 0.0;
+
+	(void)_cmd;
+	CFNumberGetValue((CFNumberRef)self, kCFNumberFloat64Type, &v);
+	return v;
+}
+
+static const cf_own_method cf_number_methods[] = {
+	{ "agKind", (IMP)cf_imp_number_kind, "C@:" },
+	{ "longLongValue", (IMP)cf_imp_number_ll, "q@:" },
+	{ "unsignedLongLongValue", (IMP)cf_imp_number_ull, "Q@:" },
+	{ "doubleValue", (IMP)cf_imp_number_double, "d@:" },
+	{ NULL, NULL, NULL },
+};
+
 static const cf_own_method cf_string_methods[] = {
 	{ "length", (IMP)cf_imp_string_length, "Q@:" },
 	{ "characterAtIndex:", (IMP)cf_imp_string_char_at, "S@:Q" },
@@ -534,6 +603,7 @@ static const struct {
 } cf_own_classes[] = {
 	{ _kCFRuntimeIDCFString, "__NSCFString", cf_string_methods },
 	{ _kCFRuntimeIDCFDate,   "__NSCFDate",   cf_date_methods },
+	{ _kCFRuntimeIDCFNumber, "__NSCFNumber", cf_number_methods },
 	{ 0, NULL, NULL },
 };
 #endif /* __OBJC__ */
