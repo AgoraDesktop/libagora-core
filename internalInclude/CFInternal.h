@@ -163,10 +163,8 @@ typedef struct os_log_s *os_log_t;
 #endif
 
 #include "ForFoundationOnly.h"
-#if DEPLOYMENT_RUNTIME_SWIFT
 #include "ForSwiftFoundationOnly.h"
 #include "CFString.h"
-#endif
 
 CF_EXPORT const char *_CFProcessName(void);
 CF_PRIVATE CFStringRef _CFProcessNameString(void);

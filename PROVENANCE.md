@@ -1,7 +1,7 @@
 # Provenance
 
 This repository began as a verbatim extraction of the C Core Foundation implementation from Apple's
-swift-corelibs-foundation, and carries the small changes Agora has made since.
+swift-corelibs-foundation, and carries the changes Agora has made since.
 
 | | |
 |---|---|
@@ -11,7 +11,7 @@ swift-corelibs-foundation, and carries the small changes Agora has made since.
 | Upstream commit date | 2026-08-18 |
 | Extracted subtree | `Sources/CoreFoundation/` |
 | Extraction date | 2026-10-10 |
-| Source changes by Agora | Swift toolchain integration removed; standalone build added — see *Agora changes* |
+| Source changes by Agora | Swift removed entirely (toolchain *and* runtime); standalone Swift-free build added — see *Agora changes* |
 
 ## What was copied
 
@@ -31,9 +31,10 @@ Also copied: upstream's `LICENSE` (Apache-2.0 with the Runtime Library Exception
 
 ## Agora changes
 
-### Swift toolchain integration removed
+Agora does not support Swift, so nothing Swift remains — neither the Swift *toolchain* integration
+nor the Swift *runtime* deployment that upstream targets.
 
-Agora does not support Swift, so the Swift toolchain integration has been removed:
+### Swift toolchain integration removed
 
 - **deleted** `include/module.modulemap` and `include/static-module.map` — the Clang module maps that
   exposed the library to Swift;
@@ -44,10 +45,32 @@ Agora does not support Swift, so the Swift toolchain integration has been remove
   exported-targets hook) and the `file(COPY … _CModulesForClients …)` header copy that fed the Swift
   XCTest clients.
 
-The C sources and headers are otherwise untouched. Upstream's Swift *runtime* surface is **kept**: the
-`_CFSwiftBridge` / `_NS*Bridge` machinery, the `CF_SWIFT_*` attributes, and the `DEPLOYMENT_RUNTIME_SWIFT`
-conditionals are C code, and `DEPLOYMENT_RUNTIME_SWIFT` is defined to `1` by default, so those paths
-are the active Linux/BSD build.
+### Swift runtime deployment disabled
+
+Core Foundation as extracted *is* a Swift-runtime component: `DEPLOYMENT_RUNTIME_SWIFT` is defined to
+`1` (in two headers), constant strings point at `_NSCFConstantString` type metadata, and
+retain/release call `swift_retain` / `swift_release`. Built that way it cannot link without the Swift
+runtime. Agora builds the **non-Swift (Objective-C) configuration** instead:
+
+- **`DEPLOYMENT_RUNTIME_SWIFT` no longer defined** — removed from both `include/CFAvailability.h` and
+  `internalInclude/CoreFoundation_Prefix.h`, and the `-DDEPLOYMENT_RUNTIME_SWIFT` compile flag
+  dropped; `-fcf-runtime-abi=swift` replaced by `-fcf-runtime-abi=objc`;
+- **`CFPlatform.c`** — the whole platform layer (thread helpers, `_CFEnviron`, `_CFOpenFile`,
+  `_CFReallocf`, the `posix_spawn` machinery, lines 1683–2478) sat inside `#if DEPLOYMENT_RUNTIME_SWIFT`,
+  i.e. upstream compiles it on Linux *only* in the Swift configuration. It is now compiled
+  unconditionally, with its thread-specific-data retain/release converted from
+  `swift_retain`/`swift_release` to `CFRetain`/`CFRelease`;
+- **`CFPlatform.c`** — added `_CFGetCurrentDirectory`. Upstream declares it
+  (`internalInclude/CFInternal.h`) but does not define it in this tree; in the Swift build the Swift
+  Foundation layer supplies it;
+- **`internalInclude/CFInternal.h`** — includes `ForSwiftFoundationOnly.h` unconditionally. Despite
+  its name, that header holds thread / XDG / posix declarations the non-Swift path needs;
+- **`CFRuntime.c`** — replaced the undefined `__kCFAllocatorTypeID_CONST` (referenced but defined
+  nowhere in this tree) with `_kCFRuntimeIDCFAllocator`.
+
+These are the only C source changes; the rest of the C sources and headers are untouched. Upstream's
+Swift-facing *attributes* (`CF_SWIFT_NAME`, `swift_attr`, the `_CFSwiftBridge` bridges) remain — they
+are C preprocessor macros that compile away, not a Swift dependency.
 
 ### Standalone build
 
@@ -62,13 +85,14 @@ and the `dispatch` dependency. `CMakeLists.txt` is now Agora's own top-level bui
   built on its own into its own `build/` and found with `find_package(dispatch CONFIG)`; an include
   shim adds its private headers (which share the `dispatch/` prefix) and its `os/*.h`, the layout
   Core Foundation's sources expect;
-- **`_Foundation_common_build_flags`** — defined for the C sources, with only the Swift-specific
-  entries dropped;
+- **`_Foundation_common_build_flags`** — defined for the C sources, with the Swift-specific entries
+  dropped;
 - **the artifact name** — the static library is built as `libagora-core.a`
   (`set_target_properties(CoreFoundation PROPERTIES OUTPUT_NAME agora-core)`); the CMake target keeps
   upstream's name, `CoreFoundation`.
 
-Verified to compile cleanly with clang into `libagora-core.a`.
+Verified: `libagora-core.a` builds with clang (0 warnings), and a CFString / CFArray / CFURL /
+CFRunLoop smoke test links and runs.
 
 ## Licence and attribution
 

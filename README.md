@@ -48,7 +48,9 @@ cmake --build build
   `../libagora-dispatch/build/cmake/modules`, override with `-Ddispatch_DIR=<dir>`.
 - The system ICU is used directly (Agora neither vendors ICU nor pins `swift-foundation-icu`); the
   `_foundation_unicode/` include prefix is recreated as a link to the system ICU headers.
-- The build produces the static library `build/libagora-core.a`. It compiles cleanly with clang;
-  GCC is not a supported compiler.
+- The build is **Swift-free**: Core Foundation is compiled in its non-Swift (Objective-C)
+  configuration, so nothing here links the Swift runtime (see [`PROVENANCE.md`](PROVENANCE.md)).
+- It produces the static library `build/libagora-core.a`; a CFString/CFArray/CFURL/CFRunLoop
+  smoke test links and runs. GCC is not a supported compiler.
 
 See [`PROVENANCE.md`](PROVENANCE.md) for how this differs from upstream's Swift-based build.

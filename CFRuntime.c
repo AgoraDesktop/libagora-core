@@ -1716,7 +1716,10 @@ static void _CFRelease(CFTypeRef CF_RELEASES_ARGUMENT cf) {
             allocator = CFGetAllocator(cf);
             usesSystemDefaultAllocator = _CFAllocatorIsSystemDefault(allocator);
 
-            if (__kCFAllocatorTypeID_CONST != __CFGenericTypeID_inline(cf)) {
+            /* Agora: upstream references an undefined __kCFAllocatorTypeID_CONST here
+               (the non-Swift path is not built on Linux upstream); the allocator type id
+               is _kCFRuntimeIDCFAllocator. */
+            if (_kCFRuntimeIDCFAllocator != __CFGenericTypeID_inline(cf)) {
                 allocatorToRelease = (CFAllocatorRef _Nonnull)__CFGetAllocator(cf);
             }
 	}

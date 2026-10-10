@@ -110,7 +110,6 @@ check_symbol_exists("issetugid" "unistd.h" HAVE_ISSETUGID)
 check_symbol_exists("sched_getaffinity" "sched.h" HAVE_SCHED_GETAFFINITY)
 
 set(_Foundation_common_build_flags
-    "-DDEPLOYMENT_RUNTIME_SWIFT"
     "-DCF_BUILDING_CF"
     "-DHAVE_STRUCT_TIMESPEC"
     "-Wno-shorten-64-to-32"
@@ -126,7 +125,7 @@ set(_Foundation_common_build_flags
     "-fconstant-cfstrings"
     "-fdollars-in-identifiers"
     "-fno-common"
-    "-fcf-runtime-abi=swift"
+    "-fcf-runtime-abi=objc"
     "-fexceptions")
 foreach(_def HAVE_STRLCAT HAVE_STRLCPY HAVE_ISSETUGID HAVE_SCHED_GETAFFINITY)
   if(${_def})

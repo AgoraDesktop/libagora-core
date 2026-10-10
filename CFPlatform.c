@@ -1680,11 +1680,7 @@ CF_PRIVATE int asprintf(char **ret, const char *format, ...) {
 
 #endif
 
-#if DEPLOYMENT_RUNTIME_SWIFT
 #include <fcntl.h>
-
-extern void *swift_retain(void *);
-extern void swift_release(void *);
 
 #if TARGET_OS_WIN32
 typedef struct _CFThreadSpecificData {
@@ -1700,10 +1696,10 @@ static void _CFThreadSpecificDestructor(void *ctx) {
 #if TARGET_OS_WIN32
     _CFThreadSpecificData *data = (_CFThreadSpecificData *)ctx;
     FlsSetValue(data->key, NULL);
-    swift_release(data->value);
+    if (data->value) CFRelease(data->value);
     free(data);
 #elif !TARGET_OS_WASI || defined(_REENTRANT)
-    swift_release(ctx);
+    if (ctx) CFRelease((CFTypeRef)ctx);
 #endif
 }
 
@@ -1734,7 +1730,7 @@ CFTypeRef _Nullable _CFThreadSpecificGet(_CFThreadSpecificKey key) {
 }
 
 void _CFThreadSpecificSet(_CFThreadSpecificKey key, CFTypeRef _Nullable value) {
-    // Intentionally not calling `swift_release` for previous value.
+    // Intentionally not calling `CFRelease` for previous value.
     // OperationQueue uses these API (through NSThreadSpecific), and balances
     // retain count manually.
 #if TARGET_OS_WIN32
@@ -1749,13 +1745,13 @@ void _CFThreadSpecificSet(_CFThreadSpecificKey key, CFTypeRef _Nullable value) {
         data->value = value;
         data->key = key;
 
-        swift_retain((void *)value);
+        CFRetain(value);
     }
 
     FlsSetValue(key, data);
 #elif !TARGET_OS_WASI || defined(_REENTRANT)
     if (value != NULL) {
-        swift_retain((void *)value);
+        CFRetain(value);
         pthread_setspecific(key, value);
     } else {
         pthread_setspecific(key, NULL);
@@ -2475,4 +2471,14 @@ CF_EXPORT int _CFPosixSpawnAttrSetFlags(_CFPosixSpawnAttrRef spawn_attr, short f
 
 #endif
 
+
+/* Agora: upstream declares _CFGetCurrentDirectory (internalInclude/CFInternal.h) but does
+   not define it in this tree -- the Swift Foundation layer supplies it in the Swift build.
+   Define it here for the standalone (non-Swift) build. */
+CF_EXPORT Boolean _CFGetCurrentDirectory(char *path, int maxlen) {
+#if TARGET_OS_WIN32
+    return GetCurrentDirectoryA(maxlen, path) != 0;
+#else
+    return getcwd(path, maxlen) != NULL;
 #endif
+}

@@ -7,9 +7,8 @@
 	See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 */
 
-#ifndef DEPLOYMENT_RUNTIME_SWIFT
-#define DEPLOYMENT_RUNTIME_SWIFT 1
-#endif
+/* Agora builds the non-Swift (Objective-C) Core Foundation, so unlike upstream
+   this file does not define DEPLOYMENT_RUNTIME_SWIFT. See PROVENANCE.md. */
 
 #if !defined(__COREFOUNDATION_CFAVAILABILITY__)
 #define __COREFOUNDATION_CFAVAILABILITY__ 1
