@@ -440,6 +440,19 @@ static unsigned short cf_imp_string_char_at(id self, SEL _cmd, unsigned long ind
 	(void)_cmd;
 	return (unsigned short)CFStringGetCharacterAtIndex((CFStringRef)self, (CFIndex)index);
 }
+
+/* THE THIRD AND LAST ONE. Base NSString is abstract and refuses -length, -characterAtIndex: and
+ * -UTF8String with a message that names itself -- "a bare NSString holds no characters" -- so a direct
+ * subclass inherits the REFUSAL rather than an implementation. The three are therefore not "what
+ * Foundation sends this class"; they are the abstract methods of the class above it, and the set closes
+ * at three. This answers with Core Foundation bytes: CFStringGetCStringPtr returns the internal buffer
+ * for an eight-bit string, which is what a CFString built from a C string has, and the pointer is valid
+ * for as long as the string is. */
+static const char *cf_imp_string_utf8(id self, SEL _cmd)
+{
+	(void)_cmd;
+	return CFStringGetCStringPtr((CFStringRef)self, kCFStringEncodingUTF8);
+}
 #endif /* __OBJC__ */
 
 #if defined(__OBJC__)
@@ -454,6 +467,7 @@ static uintptr_t cf_bridged_subclass(CFTypeID typeID, const void *cls_ref)
 	if (typeID == _kCFRuntimeIDCFString) {
 		class_addMethod(sub, @selector(length), (IMP)cf_imp_string_length, "Q@:");
 		class_addMethod(sub, @selector(characterAtIndex:), (IMP)cf_imp_string_char_at, "S@:Q");
+		class_addMethod(sub, @selector(UTF8String), (IMP)cf_imp_string_utf8, "*@:");
 	}
 	objc_registerClassPair(sub);
 	return (uintptr_t)sub;
