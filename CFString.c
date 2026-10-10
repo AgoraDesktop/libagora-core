@@ -2207,7 +2207,14 @@ CFIndex CFStringGetBytes(CFStringRef str, CFRange range, CFStringEncoding encodi
      * options:range:remainingRange: with Core Foundation's lossByte and external-representation flags
      * having no counterpart in it. */
     CF_OBJC_FUNCDISPATCHV(_kCFRuntimeIDCFString, CFIndex, (NSString *)str,
-        getBytes:(uint8_t *)buffer maxLength:(NSUInteger)maxBufLen usedLength:(NSUInteger *)usedBufLen encoding:(CFStringEncoding)encoding options:0 range:NSMakeRange(range.location, range.length) remainingRange:NULL);
+        getBytes:(uint8_t *)buffer maxLength:(NSUInteger)maxBufLen usedLength:(NSUInteger *)usedBufLen encoding:(NSUInteger)encoding options:0 range:NSMakeRange(range.location, range.length) remainingRange:NULL);
+    /* THE ARGUMENTS ARE DECLARED AS THE COCOA METHOD DECLARES THEM, NOT AS Core Foundation SPELLS THEM.
+     * CFStringEncoding is a UInt32 and NSStringEncoding is an NSUInteger, so libobjc2 reported the two
+     * sides of this selector as 'incorrect signature' -- method ...I40Q44... against selector
+     * ...i40i44... -- AND AN ARGUMENT LIST IS NOT RESTRICTED TO POINTERS: a 32-bit value in a slot the
+     * callee reads as 64-bit is a wrong answer, not a warning. Upstream call sites inside Core
+     * Foundation pass its own types because Core Foundation never talked to an Objective-C NSString
+     * before; every dispatch added here has to state what the other side declared. */
 
     __CFAssertIsNotNegative(maxBufLen);
     

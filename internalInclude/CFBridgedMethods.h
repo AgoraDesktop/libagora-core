@@ -63,7 +63,7 @@
 - (const char *)_fastCStringContents:(Boolean)nullTerminated;
 - (const UniChar *)_fastCharacterContents;
 - (Boolean)_encodingCantBeStoredInEightBitCFString;
-- (CFIndex)getBytes:(uint8_t *)buffer maxLength:(NSUInteger)maxLength usedLength:(NSUInteger *)usedLength encoding:(CFStringEncoding)encoding options:(NSUInteger)options range:(NSRange)range remainingRange:(NSRange *)remaining;
+- (CFIndex)getBytes:(uint8_t *)buffer maxLength:(NSUInteger)maxLength usedLength:(NSUInteger *)usedLength encoding:(NSUInteger)encoding options:(NSUInteger)options range:(NSRange)range remainingRange:(NSRange *)remaining;
 /* NSURL: the true CFURL behind it, which _CFURLFromNSURL is the only caller of. */
 - (CFURLRef)_cfurl;
 /* NSTimeZone: the three doors that read a zone's state at an instant. Core Foundation cannot make
