@@ -1729,7 +1729,10 @@ CFStringRef  CFStringCreateWithFormat(CFAllocatorRef alloc, CFDictionaryRef form
 
 CFStringRef CFStringCreateWithSubstring(CFAllocatorRef alloc, CFStringRef str, CFRange range) {
     CF_SWIFT_FUNCDISPATCHV(_kCFRuntimeIDCFString, CFStringRef, (CFSwiftRef)str, NSString._createSubstringWithRange, range);
-//      CF_OBJC_FUNCDISPATCHV(_kCFRuntimeIDCFString, CFStringRef , (NSString *)str, _createSubstringWithRange:NSMakeRange(range.location, range.length));
+/* AGORA: RESTORED FROM THE COMMENT ABOVE, the same way CFCopyDescription's was. A commented-out
+     * dispatch is a door that silently reads Core Foundation's storage out of a Foundation object:
+     * measured as SIGSEGV on CFStringCreateWithSubstring from an NSString. */
+    CF_OBJC_FUNCDISPATCHV(_kCFRuntimeIDCFString, CFStringRef, (NSString *)str, _createSubstringWithRange:NSMakeRange(range.location, range.length));
 
     __CFAssertIsString(str);
     __CFAssertRangeIsInStringBounds(str, range.location, range.length);
@@ -1799,7 +1802,9 @@ CF_PRIVATE CFStringRef _CFNonObjCStringCreateCopy(CFAllocatorRef alloc, CFString
 
 CFStringRef CFStringCreateCopy(CFAllocatorRef alloc, CFStringRef str) {
     CF_SWIFT_FUNCDISPATCHV(_kCFRuntimeIDCFString, CFStringRef, (CFSwiftRef)str, NSString.copy);
-//  CF_OBJC_FUNCDISPATCHV(_kCFRuntimeIDCFString, CFStringRef, (NSString *)str, copy);
+/* AGORA: restored -- this is the -copy door, and -copy on an immutable string is the same object
+     * retained, which is what a Copy-named function owes its caller. */
+    CF_OBJC_FUNCDISPATCHV(_kCFRuntimeIDCFString, CFStringRef, (NSString *)str, copy);
 
     return _CFNonObjCStringCreateCopy(alloc, str);
 }
@@ -2077,7 +2082,9 @@ CFMutableStringRef CFStringCreateMutable(CFAllocatorRef alloc, CFIndex maxLength
 CFMutableStringRef  CFStringCreateMutableCopy(CFAllocatorRef alloc, CFIndex maxLength, CFStringRef string) {
     CFMutableStringRef newString;
 
-    //  CF_OBJC_FUNCDISPATCHV(_kCFRuntimeIDCFString, CFMutableStringRef, (NSString *)string, mutableCopy);
+    /* AGORA: restored. CFStringLowercase and its neighbours reach this, which is why they used to
+     * crash: the mutable copy is Foundation's, and its methods are the ones that do the work. */
+    CF_OBJC_FUNCDISPATCHV(_kCFRuntimeIDCFString, CFMutableStringRef, (NSString *)string, mutableCopy);
 
     __CFAssertIsString(string);
 

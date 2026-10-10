@@ -200,7 +200,7 @@ CFAttributedStringRef CFAttributedStringCreate(CFAllocatorRef alloc, CFStringRef
 }
 
 CFAttributedStringRef CFAttributedStringCreateWithSubstring(CFAllocatorRef alloc, CFAttributedStringRef attrStr, CFRange range) {
-//  CF_OBJC_FUNCDISPATCHV(CFAttributedStringGetTypeID(), CFAttributedStringRef, (NSAttributedString *)attrStr, _createAttributedSubstringWithRange:NSMakeRange(range.location, range.length));
+    CF_OBJC_FUNCDISPATCHV(CFAttributedStringGetTypeID(), CFAttributedStringRef, (NSAttributedString *)attrStr, _createAttributedSubstringWithRange:NSMakeRange(range.location, range.length));
 
     __CFAssertIsAttributedString(attrStr);
     __CFAssertRangeIsInBounds(attrStr, range.location, range.length);
@@ -221,7 +221,7 @@ CFAttributedStringRef CFAttributedStringCreateWithSubstring(CFAllocatorRef alloc
 /* CFAttributedStringCreateCopy() will do a refcount bump if the argument is immutable and has the same allocator
 */
 CFAttributedStringRef CFAttributedStringCreateCopy(CFAllocatorRef alloc, CFAttributedStringRef attrStr) {
-//  CF_OBJC_FUNCDISPATCHV(CFAttributedStringGetTypeID(), CFAttributedStringRef, (NSAttributedString *)attrStr, copy);
+    CF_OBJC_FUNCDISPATCHV(CFAttributedStringGetTypeID(), CFAttributedStringRef, (NSAttributedString *)attrStr, copy);
     
     __CFAssertIsAttributedString(attrStr);
     if (!__CFAttributedStringIsMutable(attrStr) &&                                      // If the string is not mutable
@@ -284,7 +284,7 @@ CFMutableAttributedStringRef CFAttributedStringCreateMutable(CFAllocatorRef allo
 }
 
 CFMutableAttributedStringRef CFAttributedStringCreateMutableCopy(CFAllocatorRef alloc, CFIndex maxLength, CFAttributedStringRef attrStr) {
-//  CF_OBJC_FUNCDISPATCHV(CFAttributedStringGetTypeID(), CFMutableAttributedStringRef, (NSAttributedString *)attrStr, mutableCopy);
+    CF_OBJC_FUNCDISPATCHV(CFAttributedStringGetTypeID(), CFMutableAttributedStringRef, (NSAttributedString *)attrStr, mutableCopy);
     
     __CFAssertIsAttributedString(attrStr);
 

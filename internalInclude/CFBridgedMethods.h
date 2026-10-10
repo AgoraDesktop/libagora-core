@@ -31,6 +31,8 @@
 
 #include "CFBase.h"
 #include "CFStream.h"
+#include "CFString.h"
+#include "CFAttributedString.h"
 #include "CFBridgingTypes.h"	/* a sibling, reached the way CFInternal.h reaches its own */
 
 @protocol __CFBridgedMethods
@@ -47,6 +49,16 @@
 - (CFRange)_minimumRangeOfUnit:(NSCalendarUnit)unit;
 - (CFRange)_maximumRangeOfUnit:(NSCalendarUnit)unit;
 - (CFRange)_rangeOfUnit:(NSCalendarUnit)smallerUnit inUnit:(NSCalendarUnit)biggerUnit forAT:(CFAbsoluteTime)at;
+/* NSString: the substring door, and the two Copy doors. -copy and -mutableCopy are Cocoa's own and
+ * already exist on Foundation's classes; only the encoding needs declaring. */
+- (CFStringRef)_createSubstringWithRange:(NSRange)range;
+- (CFAttributedStringRef)_createAttributedSubstringWithRange:(NSRange)range;
+/* -copy AND -mutableCopy ARE DECLARED ONCE, AS id, AND THEY HAVE TO BE. A protocol cannot carry one
+ * selector twice, and the two call sites want different Core Foundation types from the same message --
+ * CFString.c casts the result to CFStringRef and CFAttributedString.c to CFAttributedStringRef. `id` is
+ * what -copy actually returns, and the dispatch macro's own cast supplies the type at each site. */
+- (id)copy;
+- (id)mutableCopy;
 /* NSString, the fast paths: both are ALLOWED TO SAY NO with NULL, and CFString.c falls back. */
 - (const char *)_fastCStringContents:(Boolean)nullTerminated;
 - (const UniChar *)_fastCharacterContents;
