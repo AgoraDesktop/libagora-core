@@ -1,0 +1,19 @@
+# Build directories and CMake in-source artefacts
+/build/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+
+# Compiled objects and libraries
+*.o
+*.lo
+*.a
+*.so
+*.so.*
+*.dylib
+*.dll
+
+# Editor / OS noise
+.DS_Store
+*.swp
+*~
