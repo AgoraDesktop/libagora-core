@@ -908,7 +908,21 @@ CF_PRIVATE void _CFAssertMismatchedTypeID(CFTypeID expected, CFTypeID actual) {
     HALT_MSG(msg);
 }
 
+/* AGORA: THE ONE PLACE EVERY GENERIC DOOR READS THE TYPE WORD, AND SO THE ONE PLACE THAT HAS TO KNOW
+ * ABOUT THE BRIDGE. CFGetTypeID, CFCopyDescription, CFEqual, CFHash and every assertion above reach the
+ * type id through here, and each of them independently dereferenced offset 0 -- the isa for a Foundation
+ * object, and for a tagged pointer not an address at all. Three of them crashed in turn before this was
+ * the place to look: CFGetTypeID, then CFRetain/CFRelease, then CFCopyDescription, all with the same
+ * pointer in rdi. Fixing each door was not converging, because the family is seven doors wide.
+ *
+ * A bridged object answers the type id its class bridges to, which is what Apple's -_cfTypeID returns. */
 CF_INLINE CFTypeID __CFGenericTypeID_inline(const void *cf) {
+    if (_CFIsAnObject(cf)) {
+        CFTypeID bridged = _CFBridgedTypeIDForObject(cf);
+        if (bridged != _kCFRuntimeNotATypeID) {
+            return bridged;
+        }
+    }
     return __CFTypeIDFromInfo(atomic_load(&(((CFRuntimeBase *)cf)->_cfinfoa)));
 }
 
