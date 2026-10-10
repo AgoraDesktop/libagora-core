@@ -337,6 +337,47 @@ extern void *class_getSuperclass(void *cls);
  * units `id` as `char *` -- which the runtime's header would redefine. */
 extern void *object_getClass(void *obj);
 
+/* AGORA: WHICH TYPE ID A FOUNDATION OBJECT ANSWERS TO -- the question CFGetTypeID asks, and the inverse
+ * of the one _CFIsObjC asks. CFGetTypeID is the most basic door Core Foundation has, and it called
+ * CF_IS_OBJC-adjacent machinery that is stubbed here, then read the type word at offset 0: on a tagged
+ * pointer that dereferences 0xd19766cde000002c and dies. (Found by libagora-base's test suite on its
+ * first run, with the pointer in rdi.)
+ *
+ * Apple's shape is the Objective-C DISPATCH macro above -- `[(id)cf _cfTypeID]`, with Foundation
+ * implementing -_cfTypeID per class. Agora asks instead, because the answer is already in the table this
+ * file owns: walk the object's class chain and return the type id whose bridge class it reaches. Same
+ * machinery as _CFIsObjC below, one pass over the registered types, and NO FOUNDATION METHOD NEEDED --
+ * which matters because this translation unit is C and a message send is not available to it.
+ *
+ * A Core Foundation object returns _kCFRuntimeNotATypeID: it wears no class (see
+ * _CFRuntimeCreateInstance), so object_getClass is NULL for it and no chain exists. */
+CF_PRIVATE CFTypeID _CFBridgedTypeIDForObject(const void *obj) {
+    uintptr_t cls;
+    CFTypeID type;
+
+    if (obj == NULL) {
+        return _kCFRuntimeNotATypeID;
+    }
+    cls = (uintptr_t)object_getClass((void *)obj);
+    if (cls == 0) {
+        return _kCFRuntimeNotATypeID;
+    }
+    for (type = 1; type < (CFTypeID)__CFRuntimeClassTableSize; type++) {
+        uintptr_t want = __CFISAForTypeID(type);
+        uintptr_t c;
+
+        if (want == 0) {
+            continue;
+        }
+        for (c = cls; c != 0; c = (uintptr_t)class_getSuperclass((void *)c)) {
+            if (c == want) {
+                return type;
+            }
+        }
+    }
+    return _kCFRuntimeNotATypeID;
+}
+
 Boolean _CFIsObjC(CFTypeID typeID, void *obj) {
     uintptr_t want, cls;
 
@@ -811,7 +852,16 @@ CFTypeID CFGetTypeID(CFTypeRef cf) {
 #endif
     CFTYPE_OBJC_FUNCDISPATCH0(CFTypeID, cf, _cfTypeID);
     CFTYPE_SWIFT_FUNCDISPATCH0(CFTypeID, cf, NSObject._cfTypeID);
-    
+
+    /* AGORA: A FOUNDATION OBJECT ANSWERS ITS BRIDGED TYPE ID, and this must come BEFORE the assertion
+     * below, which HALTs on anything that is not a Core Foundation object. */
+    {
+        CFTypeID bridged = _CFBridgedTypeIDForObject(cf);
+        if (bridged != _kCFRuntimeNotATypeID) {
+            return bridged;
+        }
+    }
+
     __CFGenericAssertIsCF(cf);
     return __CFGenericTypeID_inline(cf);
 }
