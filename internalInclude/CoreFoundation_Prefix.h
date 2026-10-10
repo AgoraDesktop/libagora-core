@@ -116,6 +116,7 @@ typedef char * Class;
 @class NSCalendar, NSCharacterSet, NSLocale, NSMutableDictionary, NSMutableSet, NSTimeZone;
 @class NSString, NSMutableString, NSMutableAttributedString;
 @class NSMutableCharacterSet;
+@class NSTimer;
 #endif
 
 #define CRSetCrashLogMessage(A) do {} while (0)

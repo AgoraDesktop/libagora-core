@@ -982,12 +982,19 @@ CF_INLINE uintptr_t __CFISAForTypeID(CFTypeID typeID) {
 #define CF_IS_OBJC(typeID, obj) \
     (__CFISAForTypeID(typeID) != 0 && _CFTypeGetClass(obj) == __CFISAForTypeID(typeID))
 
+#include "CFBridgedMethods.h"
+
 #if defined(__OBJC__)
+/* THE RECEIVER IS CAST TO THE BRIDGED CONTRACT (CFBridgedMethods.h), which is where a message's result
+ * type is known: a message to a forward-declared class is typed `id`, and `id` does not cast to the
+ * scalar and struct results some of these doors return. The other call sites are unaffected -- they cast
+ * to pointers or to `void`, which `id` satisfies -- and a message send dispatches by selector, so the
+ * cast reaches the real method. */
 #define CF_OBJC_FUNCDISPATCHV(typeID, ret, obj, ...) \
-    do { if (CF_IS_OBJC(typeID, obj)) return (ret)[(obj) __VA_ARGS__]; } while (0)
+    do { if (CF_IS_OBJC(typeID, obj)) return (ret)[(id<__CFBridgedMethods>)(obj) __VA_ARGS__]; } while (0)
 #define CF_OBJC_RETAINED_FUNCDISPATCHV(typeID, ret, obj, ...) \
-    do { if (CF_IS_OBJC(typeID, obj)) return (ret)[(obj) __VA_ARGS__]; } while (0)
-#define CF_OBJC_CALLV(obj, ...) [(obj) __VA_ARGS__]
+    do { if (CF_IS_OBJC(typeID, obj)) return (ret)[(id<__CFBridgedMethods>)(obj) __VA_ARGS__]; } while (0)
+#define CF_OBJC_CALLV(obj, ...) [(id<__CFBridgedMethods>)(obj) __VA_ARGS__]
 #else
 #define CF_OBJC_FUNCDISPATCHV(typeID, ret, obj, ...) do { } while (0)
 #define CF_OBJC_RETAINED_FUNCDISPATCHV(typeID, ret, obj, ...) do { } while (0)
