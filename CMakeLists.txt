@@ -46,6 +46,15 @@ if(NOT dispatch_DIR AND EXISTS "${AGORA_DISPATCH_DIR}/build/cmake/modules/dispat
   set(dispatch_DIR "${AGORA_DISPATCH_DIR}/build/cmake/modules" CACHE PATH
       "Directory holding libagora-dispatch's dispatchConfig.cmake")
 endif()
+
+# libagora-dispatch's exported `dispatch` target references the imported targets
+# `Threads::Threads` and `RT::rt`, so a consumer must define them before the import
+# is resolved (`RT::rt` comes from libagora-dispatch's own CMake module). A static
+# libagora-dispatch is what surfaces this.
+find_package(Threads REQUIRED)
+list(APPEND CMAKE_MODULE_PATH "${AGORA_DISPATCH_DIR}/cmake/modules")
+find_package(LibRT QUIET)
+
 find_package(dispatch CONFIG REQUIRED)
 
 # ---------------------------------------------------------------------------
@@ -95,8 +104,6 @@ target_link_libraries(_FoundationICU INTERFACE ICU::uc ICU::i18n ICU::data)
 # name it selects the non-Darwin code path in Core Foundation (and is also
 # defaulted to 1 in internalInclude/CoreFoundation_Prefix.h).
 # ---------------------------------------------------------------------------
-find_package(Threads REQUIRED)
-
 check_symbol_exists("strlcat" "string.h" HAVE_STRLCAT)
 check_symbol_exists("strlcpy" "string.h" HAVE_STRLCPY)
 check_symbol_exists("issetugid" "unistd.h" HAVE_ISSETUGID)
