@@ -18,7 +18,7 @@ cross-platform Foundation used by Swift on Linux and Windows.
 | Upstream | https://github.com/swiftlang/swift-corelibs-foundation |
 | Revision | `swift-6.4.0-RELEASE` (`d29d01ba165f6957141e07ea7fe8144ab491bc24`, 2026-08-18) |
 | Extracted subtree | `Sources/CoreFoundation/` |
-| Agora changes | Swift toolchain integration removed — see [`PROVENANCE.md`](PROVENANCE.md) |
+| Agora changes | Swift toolchain integration removed; standalone build added — see [`PROVENANCE.md`](PROVENANCE.md) |
 
 The full record is in [`PROVENANCE.md`](PROVENANCE.md).
 
@@ -30,14 +30,20 @@ per-file headers are retained unchanged.
 
 ## Build
 
-**Not yet wired.** Upstream's `CMakeLists.txt` at this root is entangled with the Swift build — it
-expects a Swift compiler, the `swift-foundation-icu` package, and libdispatch. The Swift module-map
-and `lib/swift` install pieces have been removed (see [`PROVENANCE.md`](PROVENANCE.md)).
+Standalone, with **clang**, against the **system ICU** and the sibling **`libagora-dispatch`**
+component:
 
-When wired, the build will:
+```sh
+cmake -S . -B build -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+cmake --build build
+```
 
-- use the **system ICU** directly (Agora neither vendors ICU nor pins `swift-foundation-icu`); and
-- take its dispatch runtime and blocks runtime from the sibling **`libagora-dispatch`** component
-  rather than a vendored copy — `libagora-core` keeps only its WASI-only `BlockRuntime/` fallback.
+- `libagora-dispatch` is expected next to this repository (`../libagora-dispatch`) and is built
+  in-tree. Point `-DAGORA_DISPATCH_SOURCE_DIR=<path>` elsewhere, or at a path with no
+  `CMakeLists.txt` to use an already-installed libdispatch via `find_package(dispatch CONFIG)`.
+- The system ICU is used directly (Agora neither vendors ICU nor pins `swift-foundation-icu`); the
+  `_foundation_unicode/` include prefix is recreated as a link to the system ICU headers.
+- The build produces the static library `libCoreFoundation.a`. It compiles cleanly with clang; GCC is
+  not a supported compiler.
 
-Wiring the standalone build is a later step.
+See [`PROVENANCE.md`](PROVENANCE.md) for how this differs from upstream's Swift-based build.

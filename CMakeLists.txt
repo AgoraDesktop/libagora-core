@@ -1,17 +1,136 @@
-##===----------------------------------------------------------------------===##
-##
-## This source file is part of the Swift open source project
-##
-## Copyright (c) 2024 Apple Inc. and the Swift project authors
-## Licensed under Apache License v2.0
-##
-## See LICENSE.txt for license information
-## See CONTRIBUTORS.md for the list of Swift project authors
-##
-## SPDX-License-Identifier: Apache-2.0
-##
-##===----------------------------------------------------------------------===##
+#===----------------------------------------------------------------------===#
+#
+# Agora's standalone build for Core Foundation (libagora-core).
+#
+# Upstream Core Foundation is a subdirectory of Apple's swift-corelibs-foundation
+# Swift build, which supplies the `project()`, the `_Foundation_common_build_flags`
+# variable, the `_FoundationICU` target and the `dispatch` dependency. This file
+# is Agora's replacement for that scaffolding, so libagora-core builds on its own
+# with clang, against:
+#
+#   * the *system* ICU (a `_foundation_unicode/` include prefix is recreated as a
+#     link to the system ICU headers, in place of the `swift-foundation-icu`
+#     package); and
+#   * the sibling `libagora-dispatch` component (dispatch + BlocksRuntime),
+#     built in-tree, or found installed via `find_package(dispatch CONFIG)`.
+#
+# See PROVENANCE.md for what Agora changed relative to upstream.
+#
+#===----------------------------------------------------------------------===#
 
+cmake_minimum_required(VERSION 3.24)
+
+project(AgoraCore LANGUAGES C)
+
+include(GNUInstallDirs)
+include(CheckSymbolExists)
+
+set(CMAKE_POSITION_INDEPENDENT_CODE YES)
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+  set(CMAKE_BUILD_TYPE Release CACHE STRING "" FORCE)
+endif()
+
+# ---------------------------------------------------------------------------
+# Dependency: the sibling libagora-dispatch component.
+# ---------------------------------------------------------------------------
+set(AGORA_DISPATCH_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../libagora-dispatch"
+    CACHE PATH "Source directory of the libagora-dispatch component")
+if(EXISTS "${AGORA_DISPATCH_SOURCE_DIR}/CMakeLists.txt")
+  # Expose libagora-dispatch's private headers as `dispatch/*.h`, which is how
+  # Core Foundation includes them.
+  set(INSTALL_PRIVATE_HEADERS ON)
+  # Only the dispatch library is wanted here, not libagora-dispatch's test suite.
+  set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+  add_subdirectory("${AGORA_DISPATCH_SOURCE_DIR}" "${CMAKE_BINARY_DIR}/libagora-dispatch")
+else()
+  find_package(dispatch CONFIG REQUIRED)
+endif()
+
+# ---------------------------------------------------------------------------
+# Include shim: the header layout Core Foundation's sources expect.
+#   <dispatch/*.h>            libdispatch public + private headers
+#   <os/*.h>                  libdispatch's os_object headers
+#   <_foundation_unicode/*.h> the system ICU headers
+# ---------------------------------------------------------------------------
+find_package(ICU REQUIRED COMPONENTS uc i18n data)
+
+set(_agora_include_dir "${CMAKE_BINARY_DIR}/agora-include")
+file(MAKE_DIRECTORY "${_agora_include_dir}/dispatch")
+file(CREATE_LINK "${AGORA_DISPATCH_SOURCE_DIR}/os"
+     "${_agora_include_dir}/os" SYMBOLIC)
+file(GLOB _agora_dispatch_headers
+     "${AGORA_DISPATCH_SOURCE_DIR}/dispatch/*.h"
+     "${AGORA_DISPATCH_SOURCE_DIR}/private/*.h")
+foreach(_hdr IN LISTS _agora_dispatch_headers)
+  get_filename_component(_name "${_hdr}" NAME)
+  file(CREATE_LINK "${_hdr}" "${_agora_include_dir}/dispatch/${_name}" SYMBOLIC)
+endforeach()
+
+set(_agora_icu_include_root "")
+foreach(_dir IN LISTS ICU_INCLUDE_DIRS)
+  if(EXISTS "${_dir}/unicode/ucal.h")
+    set(_agora_icu_include_root "${_dir}")
+  endif()
+endforeach()
+if(NOT _agora_icu_include_root)
+  message(FATAL_ERROR "System ICU headers not found (looked for unicode/ucal.h).")
+endif()
+file(CREATE_LINK "${_agora_icu_include_root}/unicode"
+     "${_agora_include_dir}/_foundation_unicode" SYMBOLIC)
+
+# `_FoundationICU` — upstream's name for Core Foundation's ICU dependency,
+# backed here by the system ICU.
+add_library(_FoundationICU INTERFACE)
+target_include_directories(_FoundationICU INTERFACE "${_agora_include_dir}")
+target_link_libraries(_FoundationICU INTERFACE ICU::uc ICU::i18n ICU::data)
+
+# ---------------------------------------------------------------------------
+# Common build flags. Upstream sets these in the parent Swift build; the Swift
+# specific entries are omitted. `-DDEPLOYMENT_RUNTIME_SWIFT` is kept: despite its
+# name it selects the non-Darwin code path in Core Foundation (and is also
+# defaulted to 1 in internalInclude/CoreFoundation_Prefix.h).
+# ---------------------------------------------------------------------------
+find_package(Threads REQUIRED)
+
+check_symbol_exists("strlcat" "string.h" HAVE_STRLCAT)
+check_symbol_exists("strlcpy" "string.h" HAVE_STRLCPY)
+check_symbol_exists("issetugid" "unistd.h" HAVE_ISSETUGID)
+check_symbol_exists("sched_getaffinity" "sched.h" HAVE_SCHED_GETAFFINITY)
+
+set(_Foundation_common_build_flags
+    "-DDEPLOYMENT_RUNTIME_SWIFT"
+    "-DCF_BUILDING_CF"
+    "-DHAVE_STRUCT_TIMESPEC"
+    "-Wno-shorten-64-to-32"
+    "-Wno-deprecated-declarations"
+    "-Wno-unreachable-code"
+    "-Wno-conditional-uninitialized"
+    "-Wno-unused-variable"
+    "-Wno-unused-function"
+    "-Wno-microsoft-enum-forward-reference"
+    "-Wno-int-conversion"
+    "-Wno-switch"
+    "-fblocks"
+    "-fconstant-cfstrings"
+    "-fdollars-in-identifiers"
+    "-fno-common"
+    "-fcf-runtime-abi=swift"
+    "-fexceptions")
+foreach(_def HAVE_STRLCAT HAVE_STRLCPY HAVE_ISSETUGID HAVE_SCHED_GETAFFINITY)
+  if(${_def})
+    list(APPEND _Foundation_common_build_flags "-D${_def}")
+  endif()
+endforeach()
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT APPLE)
+  list(APPEND _Foundation_common_build_flags "-D_GNU_SOURCE")
+endif()
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+  list(APPEND _Foundation_common_build_flags "-DDEBUG")
+endif()
+
+# ---------------------------------------------------------------------------
+# The Core Foundation library.
+# ---------------------------------------------------------------------------
 add_library(CoreFoundation STATIC
     CFApplicationPreferences.c
     CFArray.c
@@ -115,7 +234,8 @@ target_precompile_headers(CoreFoundation PRIVATE internalInclude/CoreFoundation_
 target_link_libraries(CoreFoundation
     PRIVATE
         _FoundationICU
-        dispatch)
+        dispatch
+        Threads::Threads)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "WASI")
     # On WASI, we use vendored BlocksRuntime instead of the one from libdispatch
