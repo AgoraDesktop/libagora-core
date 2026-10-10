@@ -254,8 +254,13 @@ target_include_directories(CoreFoundation
 #
 # The names are matched against the target's own SOURCES so the property lands on
 # the same file CMake is compiling, whichever way the list was written.
+#
+# CFRuntime.c joins them because its generic doors must hand a bridged object to
+# Objective-C (see the CFTYPE_OBJC_FUNCDISPATCH macros there) rather than to Core
+# Foundation's own callbacks, which read storage a Foundation object does not have.
 # ---------------------------------------------------------------------------
 set(_cf_objc_dispatch_sources
+    CFRuntime.c
     CFArray.c CFAttributedString.c CFCalendar.c CFCharacterSet.c CFData.c CFDate.c
     CFDictionary.c CFError.c CFLocale.c CFNumber.c CFRunLoop.c CFSet.c CFStream.c
     CFString.c CFTimeZone.c CFURL.c)

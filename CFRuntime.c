@@ -322,7 +322,11 @@ void *__CFConstantStringClassReferencePtr = NULL;
  * translation unit is C and Core Foundation's build puts the runtime's headers on the path only for its
  * Objective-C units. It is an ordinary C function in libobjc2 with the obvious signature.
  */
+#if !defined(__OBJC__)
+/* Declared only for the C build: with __OBJC__ the runtime's own headers are in view and
+ * these are the same functions. */
 extern void *class_getSuperclass(void *cls);
+#endif
 
 /* THE RUNTIME'S OWN ACCESSOR, AND READING THE ISA DIRECTLY IS WHAT IT REPLACES. A SMALL OBJECT -- a
  * tagged pointer, which is what a short @"..." literal is -- has no isa at all: libobjc2's
@@ -335,7 +339,11 @@ extern void *class_getSuperclass(void *cls);
  * shapes. The chain walk stays because libagora-base is a cluster, and both accessors are declared here
  * rather than included because this translation unit is C and Core Foundation's own build gives its C
  * units `id` as `char *` -- which the runtime's header would redefine. */
+#if !defined(__OBJC__)
+/* Declared only for the C build: with __OBJC__ the runtime's own headers are in view and
+ * these are the same functions. */
 extern void *object_getClass(void *obj);
+#endif
 
 /* AGORA: WHICH TYPE ID A FOUNDATION OBJECT ANSWERS TO -- the question CFGetTypeID asks, and the inverse
  * of the one _CFIsObjC asks. CFGetTypeID is the most basic door Core Foundation has, and it called
@@ -859,15 +867,31 @@ CF_INLINE Boolean CFTYPE_IS_SWIFT(const void *obj) {
 
 
 #define CFTYPE_IS_OBJC(obj) (false)
+/* AGORA: THE OTHER HALF OF THE FAMILY. The type-word reads are handled at __CFGenericTypeID_inline,
+ * which is enough to IDENTIFY a Foundation object -- but the doors then call through Core Foundation's
+ * own callbacks (CFString's copyDebugDesc, CFString's equal, ...), and those read CORE FOUNDATION'S
+ * STORAGE out of an object that does not have any. Measured, in that order: CFCopyDescription found
+ * CFStringGetTypeID() for an NSString and then died inside __CFStringCopyDescription with rdi no longer
+ * the tagged pointer. So the doors whose callbacks are Core Foundation's own hand the object to
+ * Objective-C instead, which is Apple's CFTYPE_OBJC_FUNCDISPATCH -- A MESSAGE SEND, WHICH IS WHY THIS
+ * TRANSLATION UNIT IS COMPILED AS OBJECTIVE-C (see CMakeLists.txt).
+ *
+ * `sel` is a MESSAGE TAIL, not a selector: `_copyDescription`, `hash`, `isEqual:, cf1`. */
+#if defined(__OBJC__)
+#define CFTYPE_OBJC_FUNCDISPATCH0(rettype, obj, sel) \
+    do { if (_CFIsAnObject(obj)) return (rettype)[(id)(obj) sel]; } while (0)
+#define CFTYPE_OBJC_FUNCDISPATCH1(rettype, obj, sel, a1) \
+    do { if (_CFIsAnObject(obj)) return (rettype)[(id)(obj) sel (a1)]; } while (0)
+#else
 #define CFTYPE_OBJC_FUNCDISPATCH0(rettype, obj, sel) do {} while (0)
 #define CFTYPE_OBJC_FUNCDISPATCH1(rettype, obj, sel, a1) do {} while (0)
+#endif
 
 
 CFTypeID CFGetTypeID(CFTypeRef cf) {
 #if defined(DEBUG)
     if (NULL == cf) { CRSetCrashLogMessage("*** CFGetTypeID() called with NULL ***"); HALT; }
 #endif
-    CFTYPE_OBJC_FUNCDISPATCH0(CFTypeID, cf, _cfTypeID);
     CFTYPE_SWIFT_FUNCDISPATCH0(CFTypeID, cf, NSObject._cfTypeID);
 
     /* AGORA: A FOUNDATION OBJECT ANSWERS ITS BRIDGED TYPE ID, and this must come BEFORE the assertion
@@ -941,8 +965,8 @@ CFTypeRef _CFNonObjCRetain(CFTypeRef cf) {
     return _CFRetain(cf, false);
 }
 
-extern void *objc_retain(void *obj);
-extern void objc_release(void *obj);
+extern void *objc_retain(void *obj);	/* not declared by the runtime's headers, in either language */
+extern void objc_release(void *obj);	/* not declared by the runtime's headers, in either language */
 
 CFTypeRef CFRetain(CFTypeRef cf) {
     if (NULL == cf) { CRSetCrashLogMessage("*** CFRetain() called with NULL ***"); HALT; }
@@ -1153,7 +1177,10 @@ CFHashCode CFHash(CFTypeRef cf) {
 // definition: produces a normally non-NULL debugging description of the object
 CFStringRef CFCopyDescription(CFTypeRef cf) {
     if (NULL == cf) return NULL;
-    // CFTYPE_OBJC_FUNCDISPATCH0(CFStringRef, cf, _copyDescription);  // XXX returns 0 refcounted item under GC
+    /* AGORA: RESTORED FROM THE COMMENT ABOVE. CFString's copyDebugDesc reads a __CFString; an NSString has
+     * none, and this is where that was measured. _copyDescription is Foundation's -- a Copy-named method
+     * returning +1, which is why it is not -description. */
+    CFTYPE_OBJC_FUNCDISPATCH0(CFStringRef, cf, _copyDescription);
     __CFGenericAssertIsCF(cf);
     if (NULL != __CFRuntimeClassTable[__CFGenericTypeID_inline(cf)]->copyDebugDesc) {
 	CFStringRef result = __CFRuntimeClassTable[__CFGenericTypeID_inline(cf)]->copyDebugDesc(cf);
