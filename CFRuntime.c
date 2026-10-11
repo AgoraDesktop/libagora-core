@@ -611,6 +611,47 @@ static double cf_imp_number_double(id self, SEL _cmd)
 	return v;
 }
 
+/* NSBOOLEAN'S PRIMITIVES, AND THEY ARE THE SAME FOUR THE NUMBER ROW HAS -- because the class being built
+ * is Foundation's NSNumber machinery reading Core Foundation's storage, and that machinery asks -agKind and
+ * a value door and derives everything else (-boolValue, -objCType, -description, -isEqual:) from them.
+ *
+ * THE KIND IS 'C' AND NOT 'c', WHICH IS THIS TREE'S @encode(BOOL) AND NOT APPLE'S. Apple's -objCType for
+ * @YES is "c"; here it is "C", because this Foundation's BOOL is an unsigned char and its -agKind has
+ * always been the @encode of the type the number was made with. Matching the kind the AGNumberBoolean class
+ * already uses is what keeps [@YES isEqual:kCFBooleanTrue] true; changing it would be a separate decision
+ * about @encode(BOOL) across the whole library. */
+static unsigned char cf_imp_boolean_kind(id self, SEL _cmd)
+{
+	(void)_cmd; (void)self;
+	return 'C';
+}
+
+static long long cf_imp_boolean_ll(id self, SEL _cmd)
+{
+	(void)_cmd;
+	return ((CFBooleanRef)self == kCFBooleanTrue) ? 1 : 0;
+}
+
+static unsigned long long cf_imp_boolean_ull(id self, SEL _cmd)
+{
+	(void)_cmd;
+	return ((CFBooleanRef)self == kCFBooleanTrue) ? 1 : 0;
+}
+
+static double cf_imp_boolean_double(id self, SEL _cmd)
+{
+	(void)_cmd;
+	return ((CFBooleanRef)self == kCFBooleanTrue) ? 1.0 : 0.0;
+}
+
+static const cf_own_method cf_boolean_methods[] = {
+	{ "agKind", (IMP)cf_imp_boolean_kind, "C@:" },
+	{ "longLongValue", (IMP)cf_imp_boolean_ll, "q@:" },
+	{ "unsignedLongLongValue", (IMP)cf_imp_boolean_ull, "Q@:" },
+	{ "doubleValue", (IMP)cf_imp_boolean_double, "d@:" },
+	{ NULL, NULL, NULL },
+};
+
 static const cf_own_method cf_number_methods[] = {
 	{ "agKind", (IMP)cf_imp_number_kind, "C@:" },
 	{ "longLongValue", (IMP)cf_imp_number_ll, "q@:" },
@@ -1704,6 +1745,7 @@ static const struct {
 	{ _kCFRuntimeIDCFString,     "__NSCFString",     cf_string_methods },
 	{ _kCFRuntimeIDCFDate,       "__NSCFDate",       cf_date_methods },
 	{ _kCFRuntimeIDCFNumber,     "__NSCFNumber",     cf_number_methods },
+	{ _kCFRuntimeIDCFBoolean,    "__NSCFBoolean",    cf_boolean_methods },
 	{ _kCFRuntimeIDCFArray,      "__NSCFArray",      cf_array_methods },
 	{ _kCFRuntimeIDCFData,       "__NSCFData",       cf_data_methods },
 	{ _kCFRuntimeIDCFDictionary, "__NSCFDictionary", cf_dictionary_methods },
@@ -1762,9 +1804,14 @@ static uintptr_t cf_bridged_subclass(CFTypeID typeID, const void *cls_ref)
 	}
 	/* AND A STATIC INSTANCE OF THIS TYPE GETS THE CLASS WRITTEN INTO IT, because it cannot have named one
 	 * before now: it was initialised at COMPILE time and its isa is a compile-time NULL. kCFNull is the
-	 * only such instance of a bridged type -- see __CFNullBindOwnedClass in CFBase.c. */
+	 * the STATIC instances of a bridged type get their class written in below: kCFNull, and CFBoolean's two
+ * constants -- see __CFNullBindOwnedClass in CFBase.c and __CFBooleanBindOwnedClass in CFNumber.c. */
 	if (typeID == _kCFRuntimeIDCFNull) {
 		__CFNullBindOwnedClass((void *)sub);
+	}
+	/* AND CFBoolean HAS TWO OF THEM, which are its only instances: kCFBooleanTrue and kCFBooleanFalse. */
+	if (typeID == _kCFRuntimeIDCFBoolean) {
+		__CFBooleanBindOwnedClass((void *)sub);
 	}
 	return (uintptr_t)sub;
 }

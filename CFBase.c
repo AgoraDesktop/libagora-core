@@ -814,9 +814,12 @@ DECLARE_STATIC_CLASS_REF(NSNull);
  * and STATIC_CLASS_REF(NSNull) is NULL without the Swift runtime (ForFoundationOnly.h), so `[kCFNull
  * description]` dereferenced a zero isa. The class that fixes it -- __NSCFNull, which cf_bridged_subclass
  * makes out of NSNull -- does not exist until Foundation registers the bridge, so it cannot be named in an
- * initialiser; it has to be written in afterwards, and that is what this function is for. Every other
- * constant object (the allocators, the booleans, the numbers) keeps its const: none of them is a type
- * Foundation bridges, so none of them ever wears a class. */
+ * initialiser; it has to be written in afterwards, and that is what this function is for. THE BOOLEANS
+ * NEED THE SAME TREATMENT AND NOW GET IT -- see __CFBooleanBindOwnedClass in CFNumber.c. They used to be
+ * named in this comment as keeping their const because "none of them is a type Foundation bridges"; a
+ * Boolean IS one, Apple says so (NSNumber is bridged with CFNumber for numbers and CFBoolean for
+ * Booleans), and its two constants are the type's only instances. The allocators and the numbers (the
+ * numeric ones) still keep their const. */
 struct __CFNull __kCFNull = {
     INIT_CFRUNTIME_BASE_WITH_CLASS(NSNull, _kCFRuntimeIDCFNull)
 };

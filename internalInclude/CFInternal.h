@@ -858,6 +858,7 @@ extern void _CFRuntimeSetInstanceTypeIDAndIsa(CFTypeRef cf, CFTypeID newTypeID);
  * bridge, so it is patched the moment cf_bridged_subclass creates that class. Defined in CFBase.c,
  * called from CFRuntime.c. */
 CF_PRIVATE void __CFNullBindOwnedClass(void *cls);
+CF_PRIVATE void __CFBooleanBindOwnedClass(void *cls);
 
 #if DEPLOYMENT_RUNTIME_SWIFT
 #define CF_IS_SWIFT(type, obj) (_CFIsSwift(type, (CFSwiftRef)obj))

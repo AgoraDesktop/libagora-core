@@ -87,15 +87,30 @@ struct __CFBoolean {
 
 DECLARE_STATIC_CLASS_REF(__NSCFBoolean);
 
-_CF_CONSTANT_OBJECT_BACKING struct __CFBoolean __kCFBooleanTrue = {
+/* NOT const, for the reason __kCFNull is not (CFBase.c): STATIC_CLASS_REF is NULL in this build, so
+ * the class can only be written in after Foundation registers the bridge. */
+struct __CFBoolean __kCFBooleanTrue = {
     INIT_CFRUNTIME_BASE_WITH_CLASS(__NSCFBoolean, _kCFRuntimeIDCFBoolean)
 };
 const CFBooleanRef kCFBooleanTrue = &__kCFBooleanTrue;
 
-_CF_CONSTANT_OBJECT_BACKING struct __CFBoolean __kCFBooleanFalse = {
+/* NOT const, for the reason __kCFNull is not (CFBase.c): STATIC_CLASS_REF is NULL in this build, so
+ * the class can only be written in after Foundation registers the bridge. */
+struct __CFBoolean __kCFBooleanFalse = {
     INIT_CFRUNTIME_BASE_WITH_CLASS(__NSCFBoolean, _kCFRuntimeIDCFBoolean)
 };
 const CFBooleanRef kCFBooleanFalse = &__kCFBooleanFalse;
+
+/* AND THE CLASS THE TWO STATIC CONSTANTS CANNOT NAME AT COMPILE TIME, FOR THE SAME REASON CFNull CANNOT
+ * (see __CFNullBindOwnedClass in CFBase.c): STATIC_CLASS_REF(__NSCFBoolean) expands to NULL in a build
+ * where Foundation does not define those symbols, which is this one, so both constants were born wearing NO
+ * class at all. MEASURED, in that state: messaging one was a KILLED BY SIGNAL --
+ * [(NSNumber *)kCFBooleanTrue boolValue] -- because Foundation's -boolValue had nothing to message.
+ * cf_bridged_subclass calls this the moment the owned class is made. */
+CF_PRIVATE void __CFBooleanBindOwnedClass(void *cls) {
+    __kCFBooleanTrue._base._cfisa = (uintptr_t)cls;
+    __kCFBooleanFalse._base._cfisa = (uintptr_t)cls;
+}
 
 static CFStringRef __CFBooleanCopyDescription(CFTypeRef cf) {
     CFBooleanRef boolean = (CFBooleanRef)cf;
