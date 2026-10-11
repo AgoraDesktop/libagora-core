@@ -921,16 +921,7 @@ static const cf_own_method cf_mutable_dictionary_methods[] = {
 	{ NULL, NULL, NULL },
 };
 
-static const struct {
-	CFTypeID type;
-	const char *name;
-	const char *superclass;
-	const cf_own_method *methods;
-} cf_own_mutable_classes[] = {
-	{ _kCFRuntimeIDCFArray, "__NSCFMutableArray", "NSMutableArray", cf_mutable_array_methods },
-	{ _kCFRuntimeIDCFDictionary, "__NSCFMutableDictionary", "NSMutableDictionary", cf_mutable_dictionary_methods },
-	{ 0, NULL, NULL, NULL },
-};
+
 
 static unsigned long cf_imp_set_count(id self, SEL _cmd)
 {
@@ -967,6 +958,54 @@ static const cf_own_method cf_set_methods[] = {
 	{ "count", (IMP)cf_imp_set_count, "Q@:" },
 	{ "member:", (IMP)cf_imp_set_member, "@@:@" },
 	{ "objectEnumerator", (IMP)cf_imp_set_object_enumerator, "@@:" },
+	{ NULL, NULL, NULL },
+};
+
+/* ---------------------------------------------------------------------------------------------------- */
+/* THE MUTABLE HALF OF A SET: ONE STORAGE DOOR, AND THE SAME CFBasicHash A DICTIONARY IS                */
+/* ---------------------------------------------------------------------------------------------------- */
+/* A set's whole storage contract is ONE door -- -fnReplaceMembers: -- and MEASURED, that is what every
+ * mutable operation in Foundation funnels through: -addObject: copies the members, appends, and replaces;
+ * -unionSet:, -minusSet:, -intersectSet: and -setSet: compute the new membership and replace. So a class
+ * with storage of its own answers that one door and inherits a complete mutable set -- the cheapest of
+ * these types so far, and the first that needed NO Foundation routing at all beyond its mutation word.
+ *
+ * A CFSet IS A CFBasicHash, exactly like a CFDictionary, so its mutable creator re-stamps the object and
+ * the CATEGORY is what says which half it is. */
+static void cf_imp_mutable_set_replace(id self, SEL _cmd, id members)
+{
+	NSUInteger i, n;
+
+	(void)_cmd;
+	/* REPLACE MEANS EXACTLY THESE, so the set is emptied first: what the door promises is the membership
+	 * it is handed, not a union with what was there. */
+	CFSetRemoveAllValues((CFMutableSetRef)self);
+	n = (members != nil) ? (NSUInteger)[members count] : 0;
+	for (i = 0; i < n; i++) {
+		CFSetAddValue((CFMutableSetRef)self, (const void *)[members objectAtIndex:i]);
+	}
+}
+
+static unsigned long *cf_imp_mutable_set_mutation_word(id self, SEL _cmd)
+{
+	(void)_cmd;
+	return __CFBasicHashGetMutationWord((void *)self);
+}
+
+static id cf_imp_mutable_set_init(id self, SEL _cmd)
+{
+	(void)_cmd;
+	return self;
+}
+
+static const cf_own_method cf_mutable_set_methods[] = {
+	{ "count", (IMP)cf_imp_set_count, "Q@:" },
+	{ "member:", (IMP)cf_imp_set_member, "@@:@" },
+	{ "objectEnumerator", (IMP)cf_imp_set_object_enumerator, "@@:" },
+	{ "fnReplaceMembers:", (IMP)cf_imp_mutable_set_replace, "v@:@@" },
+	{ "fnMutationWord", (IMP)cf_imp_mutable_set_mutation_word, "^Q@:" },
+	{ "init", (IMP)cf_imp_mutable_set_init, "@@:" },
+	{ "initWithCapacity:", (IMP)cf_imp_mutable_set_init, "@@:Q" },
 	{ NULL, NULL, NULL },
 };
 
@@ -1922,6 +1961,18 @@ static const struct {
 extern SEL sel_registerName(const char *name);
 
 /* ---------------------------------------------------------------------------------------------------- */
+static const struct {
+	CFTypeID type;
+	const char *name;
+	const char *superclass;
+	const cf_own_method *methods;
+} cf_own_mutable_classes[] = {
+	{ _kCFRuntimeIDCFArray, "__NSCFMutableArray", "NSMutableArray", cf_mutable_array_methods },
+	{ _kCFRuntimeIDCFDictionary, "__NSCFMutableDictionary", "NSMutableDictionary", cf_mutable_dictionary_methods },
+	{ _kCFRuntimeIDCFSet, "__NSCFMutableSet", "NSMutableSet", cf_mutable_set_methods },
+	{ 0, NULL, NULL, NULL },
+};
+
 /* THE METHOD TYPES A ROW GIVES MUST BE THE FULL ENCODING FOR ANY SELECTOR WITH TWO ARGUMENTS OR MORE    */
 /* ---------------------------------------------------------------------------------------------------- */
 /* MEASURED, and it cost an afternoon: an owned class built by HAND with the ABBREVIATED encoding --

@@ -136,7 +136,9 @@ CFMutableSetRef CFSetCreateMutable(CFAllocatorRef allocator, CFIndex capacity, c
     CFAssert2(0 <= capacity, __kCFLogAssertion, "%s(): capacity (%ld) cannot be less than zero", __PRETTY_FUNCTION__, capacity);
     CFBasicHashRef ht = __CFSetCreateGeneric(allocator, callbacks);
     if (!ht) return NULL;
-    _CFRuntimeSetInstanceTypeIDAndIsa(ht, typeID);
+    /* THE CATEGORY, WHICH IS WHAT SAYS THIS INSTANCE IS THE MUTABLE HALF -- a set is a CFBasicHash and
+     * shares its type id with the immutable half, exactly as a dictionary does. */
+    _CFRuntimeSetInstanceTypeIDAndIsaForCategory(ht, typeID, (const unsigned char *)"CFMutableSet");
     if (__CFOASafe) __CFSetLastAllocationEventName(ht, "CFSet (mutable)");
     return (CFMutableSetRef)ht;
 }
