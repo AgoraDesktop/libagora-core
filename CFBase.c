@@ -809,10 +809,22 @@ struct __CFNull {
 
 DECLARE_STATIC_CLASS_REF(NSNull);
 
-struct __CFNull _CF_CONSTANT_OBJECT_BACKING __kCFNull = {
+/* AGORA: THE `const` IS DROPPED HERE AND NOWHERE ELSE, BECAUSE THIS IS THE ONE STATIC THAT GETS A CLASS
+ * WRITTEN INTO IT AFTER THE PROGRAM STARTS. INIT_CFRUNTIME_BASE_WITH_CLASS BAKES `_cfisa` AT COMPILE TIME
+ * and STATIC_CLASS_REF(NSNull) is NULL without the Swift runtime (ForFoundationOnly.h), so `[kCFNull
+ * description]` dereferenced a zero isa. The class that fixes it -- __NSCFNull, which cf_bridged_subclass
+ * makes out of NSNull -- does not exist until Foundation registers the bridge, so it cannot be named in an
+ * initialiser; it has to be written in afterwards, and that is what this function is for. Every other
+ * constant object (the allocators, the booleans, the numbers) keeps its const: none of them is a type
+ * Foundation bridges, so none of them ever wears a class. */
+struct __CFNull __kCFNull = {
     INIT_CFRUNTIME_BASE_WITH_CLASS(NSNull, _kCFRuntimeIDCFNull)
 };
 const CFNullRef kCFNull = &__kCFNull;
+
+CF_PRIVATE void __CFNullBindOwnedClass(void *cls) {
+    __kCFNull._base._cfisa = (uintptr_t)cls;
+}
 
 static CFStringRef __CFNullCopyDescription(CFTypeRef cf) {
     return CFStringCreateWithFormat(kCFAllocatorSystemDefault, NULL, CFSTR("<CFNull %p [%p]>"), cf, CFGetAllocator(cf));

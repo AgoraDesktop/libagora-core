@@ -34,6 +34,7 @@
 #include "CFUUID.h"
 #include "CFTimeZone.h"
 #include "CFCalendar.h"
+#include "CFAttributedString.h"	/* the owned class for CFAttributedString answers from its two doors */
 #if TARGET_OS_IPHONE
 // This isn't in the embedded runtime.h header
 OBJC_EXPORT void *objc_destructInstance(id obj);
@@ -369,10 +370,49 @@ extern void *object_getClass(void *obj);
  * _CFRuntimeCreateInstance asks what a Core Foundation object should wear. */
 #if defined(__OBJC__)
 static uintptr_t __CFRuntimeCFOwnClassTable[__CFRuntimeClassTableSize];
+
+/* AGORA: THE SAME CLASSES, AS A LIST. CFRetain and CFRelease have to ask "is this object Core
+ * Foundation's own?", and they ask it on EVERY call, so the answer cannot be a walk of the type-id
+ * table -- 1024 entries deep on the hot path. Filled by cf_bridged_subclass below, and short: one entry
+ * per type that has an owned class. */
+#define __CFRuntimeMaxOwnedClasses 32
+static uintptr_t __CFRuntimeOwnedClasses[__CFRuntimeMaxOwnedClasses];
+static size_t __CFRuntimeOwnedClassCount;
 #endif
 
 CF_PRIVATE Boolean _CFIsAnObject(const void *obj) {
     return obj != NULL && object_getClass((void *)obj) != NULL;
+}
+
+/* AGORA: IS THIS OBJECT ONE CORE FOUNDATION MADE, RATHER THAN ONE FOUNDATION DID? Both are objects, and
+ * CFRetain/CFRelease must treat them differently -- see the note on CFRetain. MEASURED, AND IT IS WHY THIS
+ * EXISTS: libobjc2 keeps its retain count at ((uintptr_t *)obj)[-1], which for a CFRuntime allocation is
+ * the MALLOC CHUNK HEADER. A probe over CFArray/CFString/CFData/CFDictionary/CFSet read 0x41, 0x31, 0x51,
+ * 0x51, 0x41 before the retain and saw each word INCREMENTED by CFRetain and decremented by CFRelease --
+ * heap metadata rewritten, and Core Foundation's own reference count never touched, so no Core Foundation
+ * object wearing an owned class was ever freed. */
+CF_PRIVATE Boolean _CFIsOwnedCFObject(const void *obj) {
+#if defined(__OBJC__)
+    uintptr_t cls;
+    size_t i;
+
+    if (obj == NULL) {
+        return false;
+    }
+    cls = (uintptr_t)object_getClass((void *)obj);
+    if (cls == 0) {
+        return false;
+    }
+    for (i = 0; i < __CFRuntimeOwnedClassCount; i++) {
+        if (__CFRuntimeOwnedClasses[i] == cls) {
+            return true;
+        }
+    }
+    return false;
+#else
+    (void)obj;
+    return false;
+#endif
 }
 
 CF_PRIVATE CFTypeID _CFBridgedTypeIDForObject(const void *obj) {
@@ -607,32 +647,1055 @@ static const cf_own_method cf_array_methods[] = {
 	{ NULL, NULL, NULL },
 };
 
+/* NSData PRIMITIVES, AND THEY ARE THREE. AGDataItems, AGDataEmpty and AGDataMutable implement NO methods
+ * of the byte surface between them -- the front's OWN ivars are the storage, so -length and -bytes are
+ * written once on NSData over `_length` and `_bytes` -- which makes this the FIRST type whose primitives
+ * are NOT the concrete classes' but the base class's. They are still only the methods that READ THAT
+ * STORAGE: -length, -bytes, and -getBytes: (the legacy void form, which memcpy's from `_bytes` itself).
+ * -getBytes:length: and -getBytes:range: are already written over -length and -bytes, so they come free.
+ *
+ * THE MUTABLE CASE IS NOT COVERED, for the reason CFArray's note gives -- CFDataRef and CFMutableDataRef
+ * share one type id. */
+static unsigned long cf_imp_data_length(id self, SEL _cmd)
+{
+	(void)_cmd;
+	return (unsigned long)CFDataGetLength((CFDataRef)self);
+}
+
+static const void *cf_imp_data_bytes(id self, SEL _cmd)
+{
+	(void)_cmd;
+	return (const void *)CFDataGetBytePtr((CFDataRef)self);
+}
+
+static void cf_imp_data_get_bytes(id self, SEL _cmd, void *buffer)
+{
+	(void)_cmd;
+	if (buffer != NULL) {
+		CFDataGetBytes((CFDataRef)self, CFRangeMake(0, CFDataGetLength((CFDataRef)self)), (UInt8 *)buffer);
+	}
+}
+
+static const cf_own_method cf_data_methods[] = {
+	{ "length", (IMP)cf_imp_data_length, "Q@:" },
+	{ "bytes", (IMP)cf_imp_data_bytes, "r^v@:" },
+	{ "getBytes:", (IMP)cf_imp_data_get_bytes, "v@:^v" },
+	{ NULL, NULL, NULL },
+};
+
+/* ---------------------------------------------------------------------------
+ * THE TWO CONTAINER TYPES, AND THE ONE PRIMITIVE CORE FOUNDATION HAS NO DOOR FOR.
+ *
+ * NSDictionary's primitives are -count, -objectForKey: and -keyEnumerator; NSSet's are -count, -member:
+ * and -objectEnumerator. FIVE OF THE SIX ARE CORE FOUNDATION DOORS AND THE SIXTH IS NOT, and it is not a
+ * gap in Core Foundation: Core Foundation HAS no enumerator object, which is why an enumerator is a
+ * Foundation class. So the six is answered from THE OTHER SIDE OF THE SAME BRIDGE -- a KEY SNAPSHOT is
+ * built with CFArray (pure Core Foundation) and the enumerator is asked OF that array as an Objective-C
+ * object. The array only has to be an NSArray for the length of one message, and it is one: CFArray's
+ * type id is bridged to NSArray and CF's own arrays now wear __NSCFArray, so -objectEnumerator is
+ * NSArray's implementation counting through CFArrayGetCount/GetValueAtIndex.
+ *
+ * NOTHING LEAKS: the enumerator's own -initWithSequence: takes a FOUNDATION COPY of the sequence (and
+ * retains each element), so the Core Foundation snapshot is released as soon as the message returns.
+ * ------------------------------------------------------------------------- */
+extern id objc_msgSend(id self, SEL _cmd, ...);	/* libobjc2 declares it in objc/message.h, not here */
+extern id objc_autorelease(id obj);		/* ... and this one in objc/objc-arc.h */
+extern void *objc_autoreleasePoolPush(void);	/* ... and these two, for the reason -autorelease gives */
+extern void objc_autoreleasePoolPop(void *pool);
+
+static id cf_imp_snapshot_enumerator(const void **values, CFIndex count)
+{
+	CFArrayRef snapshot = CFArrayCreate(kCFAllocatorDefault, values, count, &kCFTypeArrayCallBacks);
+	id enumerator;
+
+	if (snapshot == NULL) {
+		return NULL;
+	}
+	enumerator = objc_msgSend((id)snapshot, sel_registerName("objectEnumerator"));
+	CFRelease(snapshot);
+	return enumerator;
+}
+
+static unsigned long cf_imp_dictionary_count(id self, SEL _cmd)
+{
+	(void)_cmd;
+	return (unsigned long)CFDictionaryGetCount((CFDictionaryRef)self);
+}
+
+static id cf_imp_dictionary_object_for_key(id self, SEL _cmd, id key)
+{
+	(void)_cmd;
+	return (id)CFDictionaryGetValue((CFDictionaryRef)self, (const void *)key);
+}
+
+static id cf_imp_dictionary_key_enumerator(id self, SEL _cmd)
+{
+	CFIndex count = CFDictionaryGetCount((CFDictionaryRef)self);
+	const void **keys = NULL;
+	id enumerator;
+
+	(void)_cmd;
+	if (count > 0) {
+		keys = (const void **)malloc((size_t)count * sizeof(void *));
+		if (keys == NULL) {
+			return NULL;
+		}
+		CFDictionaryGetKeysAndValues((CFDictionaryRef)self, keys, NULL);
+	}
+	enumerator = cf_imp_snapshot_enumerator(keys, count);
+	free(keys);
+	return enumerator;
+}
+
+static const cf_own_method cf_dictionary_methods[] = {
+	{ "count", (IMP)cf_imp_dictionary_count, "Q@:" },
+	{ "objectForKey:", (IMP)cf_imp_dictionary_object_for_key, "@@:@" },
+	{ "keyEnumerator", (IMP)cf_imp_dictionary_key_enumerator, "@@:" },
+	{ NULL, NULL, NULL },
+};
+
+static unsigned long cf_imp_set_count(id self, SEL _cmd)
+{
+	(void)_cmd;
+	return (unsigned long)CFSetGetCount((CFSetRef)self);
+}
+
+static id cf_imp_set_member(id self, SEL _cmd, id object)
+{
+	(void)_cmd;
+	return object == nil ? nil : (id)CFSetGetValue((CFSetRef)self, (const void *)object);
+}
+
+static id cf_imp_set_object_enumerator(id self, SEL _cmd)
+{
+	CFIndex count = CFSetGetCount((CFSetRef)self);
+	const void **values = NULL;
+	id enumerator;
+
+	(void)_cmd;
+	if (count > 0) {
+		values = (const void **)malloc((size_t)count * sizeof(void *));
+		if (values == NULL) {
+			return NULL;
+		}
+		CFSetGetValues((CFSetRef)self, values);
+	}
+	enumerator = cf_imp_snapshot_enumerator(values, count);
+	free(values);
+	return enumerator;
+}
+
+static const cf_own_method cf_set_methods[] = {
+	{ "count", (IMP)cf_imp_set_count, "Q@:" },
+	{ "member:", (IMP)cf_imp_set_member, "@@:@" },
+	{ "objectEnumerator", (IMP)cf_imp_set_object_enumerator, "@@:" },
+	{ NULL, NULL, NULL },
+};
+
 static const cf_own_method cf_string_methods[] = {
 	{ "length", (IMP)cf_imp_string_length, "Q@:" },
 	{ "characterAtIndex:", (IMP)cf_imp_string_char_at, "S@:Q" },
-	{ "UTF8String", (IMP)cf_imp_string_utf8, "*@:" },
+	{ "UTF8String", (IMP)cf_imp_string_utf8, "r*@:" },
 	{ NULL, NULL, NULL },
 };
 
 static const cf_own_method cf_date_methods[] = {
 	{ "timeIntervalSinceReferenceDate", (IMP)cf_imp_date_absolute_time, "d@:" },
 	{ "timeIntervalSinceDate:", (IMP)cf_imp_date_since, "d@:@" },
-	{ "compare:", (IMP)cf_imp_date_compare, "q@:@" },
+	{ "compare:", (IMP)cf_imp_date_compare, "i@:@" },
+	{ NULL, NULL, NULL },
+};
+
+/* EVERY ROW GETS THESE, BECAUSE THE REFERENCE COUNT IS THE ONE THING EVERY CORE FOUNDATION OBJECT HAS IN
+ * COMMON: it is Core Foundation's own, in cfinfoa, and the Objective-C retain family has to answer with
+ * THAT count rather than with one of its own.
+ *
+ * THE OTHER HALF OF THE SAME MEASUREMENT as CFRetain's note. libobjc2 keeps its retain count at
+ * ((uintptr_t *)obj)[-1] -- for a CFRuntime allocation, the malloc chunk header -- and a probe showed the
+ * OBJECTIVE-C side moving it just as CFRetain used to: `[aNativeCFData retain]` read 0x51 and left 0x52,
+ * `-release` 0x51 again. Two counts for one object, and neither of them Core Foundation's.
+ *
+ * SO THE MESSAGE GOES BACK TO THE C API, which is the same answer Apple gives: objc_retain on a
+ * CF-created object IS CFRetain on it.
+ *
+ * AND -autorelease DEFERS, RATHER THAN ANSWERING THE IDENTITY. It answers CFAutorelease, which in this
+ * tree is a no-op stub -- so `[anObjectIJustCreated autorelease]` on a Core Foundation object dropped the
+ * release on the floor, and a method whose contract is "+0" (every -Copy- and -Create-shaped accessor in
+ * the door table below) had no way to answer without leaking. This IMP puts the object in the runtime's
+ * autorelease pool instead, and the count still ends up in the right place: the pool drains with
+ * objc_release, which for a class that DEFINES -release is a message to -release, which is the method
+ * three lines up.
+ *
+ * AND IT PRIMES THE RUNTIME'S POOL FLAG FIRST, WHICH IS NOT SUPERSTITION -- IT IS THE ONLY WAY OUT OF A
+ * LOOP. libobjc2's autorelease() asks three questions in order: `useARCAutoreleasePool`, then
+ * `objc_class_flag_fast_arc`, and if both are no IT SENDS -autorelease TO THE OBJECT. Our classes have
+ * neither flag (the second one is exactly what would send retain and release back to the malloc chunk
+ * header -- see the note above), so calling objc_autorelease from this method is a message back to this
+ * method: measured, as a stack that ran away. objc_autoreleasePoolPush() is what sets
+ * useARCAutoreleasePool (libobjc2's initAutorelease, which base's NSAutoreleasePool answers with
+ * -_ARCCompatibleAutoreleasePool), so this pushes and pops one empty pool ONCE to prime it and then
+ * objc_autorelease takes the pool path it was always meant to take.
+ *
+ * AND base's +[NSAutoreleasePool addObject:] IS NOT THE WAY OUT, though it looks like one: its body IS
+ * `[object autorelease]`, so asking the pool to add the object lands back in this method. It was written
+ * down here as the way out before it was read.
+ *
+ * THE IMP CANNOT RECURSE, OTHERWISE: CFRetain asks _CFIsOwnedCFObject first (see its note) and takes the
+ * Core Foundation path for exactly these classes, so the door never sends -retain back to this method. */
+static id cf_imp_object_retain(id self, SEL _cmd)
+{
+	(void)_cmd;
+	return (id)CFRetain((CFTypeRef)self);
+}
+
+static void cf_imp_object_release(id self, SEL _cmd)
+{
+	(void)_cmd;
+	CFRelease((CFTypeRef)self);
+}
+
+static Boolean cf_object_autorelease_pool_ready = false;
+
+static id cf_imp_object_autorelease(id self, SEL _cmd)
+{
+	(void)_cmd;
+	if (!cf_object_autorelease_pool_ready) {
+		void *token = objc_autoreleasePoolPush();
+
+		objc_autoreleasePoolPop(token);	/* empty, and that is the point: it runs initAutorelease */
+		cf_object_autorelease_pool_ready = true;
+	}
+	return objc_autorelease((id)self);
+}
+
+static const cf_own_method cf_object_methods[] = {
+	{ "retain", (IMP)cf_imp_object_retain, "@@:" },
+	{ "release", (IMP)cf_imp_object_release, "v@:" },
+	{ "autorelease", (IMP)cf_imp_object_autorelease, "@@:" },
 	{ NULL, NULL, NULL },
 };
 
 /* One row per type that has been given an owned class. CFDate is here because it is the cheapest real
- * one at three methods; the rest of the registered types still wear no class, which is why handing one
- * to Foundation segfaults and why the suite now says so out loud. */
+ * one at three methods; ONE REGISTERED TYPE STILL MISSING FROM THIS TABLE WEARS NO CLASS, which is why
+ * handing one to Foundation segfaults and why the suite says so out loud:
+ *
+ *   CFURL -- NOT A CLUSTER. Its accessors read the base class's OWN ivars, so a subclass that implements a
+ *   few primitives inherits a hundred methods that read garbage. It needs the treatment NSDate got: make
+ *   the storage readers the abstract primitives on the Foundation side first.
+ *
+ * CFTimeZone IS IN THE TABLE AND IS VERIFIED, AND IT TOOK THREE FIXES ON THE WAY IN -- all three in
+ * libagora-base, all three reached only because CFTimeZoneCreateWithName builds its zone path from a
+ * CFSTR and Core Foundation's file-URL construction then walks into Foundation:
+ *
+ *   NSCFConstantString's two encoding doors CALLED THE DOOR THAT DISPATCHES TO THEM (a stack overflow
+ *   523,844 frames deep, and the reason CFTimeZoneCreateWithName died for every argument);
+ *   the same class did not implement -_getCString:maxLength:encoding: at all, which is the door
+ *   CFStringGetCString dispatches to;
+ *   and that new implementation CAST a CFStringEncoding to an NSStringEncoding, on the wrong assumption
+ *   that the two enumerations agree -- they do not (kCFStringEncodingUTF8 is 0x08000100, NSUTF8StringEncoding
+ *   is 4), so CFStringGetCString answered false, POSIXPathToURLPath answered NULL, and
+ *   CFURLCreateCopyAppendingPathComponent dereferenced that NULL.
+ *
+ * AND ONE ROW HAS NO METHODS AT ALL. CFNull is a NAME and nothing else: NSNull holds no storage, and its
+ * -description, -isEqual: (identity) and -hash (a constant) are content-free, so there is nothing for a
+ * subclass to re-answer. THE ROW STILL MATTERS, because the class has to EXIST before the only CFNull
+ * there is can wear it -- and that instance is a static whose isa is a compile-time NULL, which
+ * cf_bridged_subclass writes in through __CFNullBindOwnedClass the moment this class is made. */
+static const cf_own_method cf_null_methods[] = {
+	{ NULL, NULL, NULL },
+};
+
+/* NSTimeZone PRIMITIVES, AND THERE ARE EIGHT -- THE MOST ANY TYPE HAS NEEDED, AND IT IS STILL NOT A
+ * REIMPLEMENTATION. They are the eight methods on NSTimeZone that READ THE BASE CLASS'S OWN IVARS
+ * (`_name`, `_secondsFromGMT`, `_data`); everything else on the class is already written over them --
+ * -isEqualToTimeZone:, -hash and -description over -name; -isDaylightSavingTime and
+ * -nextDaylightSavingTimeTransition over their ...ForDate: forms; and -secondsFromGMT over
+ * -secondsFromGMTForDate:, which is the ONE line of Foundation this needed (NSTimeZone.m). That is the
+ * treatment NSDate got, and the reason it is needed at all: NSTimeZone is not a class cluster, so its
+ * concrete class IS the class with the storage.
+ *
+ * THE DATES CROSS AS ABSOLUTE TIMES, WHICH IS THE SAME CONVERSION THE OTHER DIRECTION ALREADY MAKES.
+ * Every Core Foundation time zone door takes a CFAbsoluteTime and Foundation hands these methods an
+ * NSDate, so each one sends -timeIntervalSinceReferenceDate -- the primitive the CFDate owned class
+ * answers from CFDateGetAbsoluteTime.
+ *
+ * THREE OF THEM ANSWER A +0 METHOD FROM A +1 CORE FOUNDATION DOOR, which is why -autorelease above had to
+ * be made to mean something: -abbreviationForDate: and -localizedName:locale: are Copy-shaped (+1), and
+ * -nextDaylightSavingTimeTransitionAfterDate: builds its date with CFDateCreate (an object that IS an
+ * NSDate, since CFDate and NSDate are one object through this bridge). All three end in `[autorelease]`,
+ * and that now defers to the runtime's pool the way Foundation's own methods do.
+ *
+ * NONE OF THE THREE IS REACHED BY THE SUITE, which is worth writing down rather than leaving implied: it
+ * drives -name, and the leak these three would otherwise have had is fixed by the retain family above
+ * rather than by a test that can see it. */
+static CFAbsoluteTime cf_absolute_time_of(id date)
+{
+	typedef double (*cf_absolute_time_fn)(id, SEL);
+
+	return date == nil ? 0.0
+			   : ((cf_absolute_time_fn)objc_msgSend)(date, sel_registerName("timeIntervalSinceReferenceDate"));
+}
+
+static id cf_imp_timezone_name(id self, SEL _cmd)
+{
+	(void)_cmd;
+	return (id)CFTimeZoneGetName((CFTimeZoneRef)self);
+}
+
+static long cf_imp_timezone_seconds_from_gmt(id self, SEL _cmd, id date)
+{
+	(void)_cmd;
+	return (long)CFTimeZoneGetSecondsFromGMT((CFTimeZoneRef)self, cf_absolute_time_of(date));
+}
+
+static char cf_imp_timezone_is_dst(id self, SEL _cmd, id date)
+{
+	(void)_cmd;
+	return (char)(CFTimeZoneIsDaylightSavingTime((CFTimeZoneRef)self, cf_absolute_time_of(date)) ? 1 : 0);
+}
+
+static id cf_imp_timezone_next_transition(id self, SEL _cmd, id date)
+{
+	CFAbsoluteTime at;
+
+	(void)_cmd;
+	/* ZERO IS CORE FOUNDATION'S "THERE IS NO NEXT TRANSITION" (CFTimeZone.c) and nil is Foundation's,
+	 * which is the same answer the base class gives a named zone with no transition table. */
+	at = CFTimeZoneGetNextDaylightSavingTimeTransition((CFTimeZoneRef)self, cf_absolute_time_of(date));
+	return at == 0.0 ? nil : [(id)CFDateCreate(kCFAllocatorDefault, at) autorelease];
+}
+
+static id cf_imp_timezone_abbreviation(id self, SEL _cmd, id date)
+{
+	(void)_cmd;
+	return [(id)CFTimeZoneCopyAbbreviation((CFTimeZoneRef)self, cf_absolute_time_of(date)) autorelease];
+}
+
+static double cf_imp_timezone_dst_offset(id self, SEL _cmd, id date)
+{
+	(void)_cmd;
+	return (double)CFTimeZoneGetDaylightSavingTimeOffset((CFTimeZoneRef)self, cf_absolute_time_of(date));
+}
+
+static id cf_imp_timezone_localized_name(id self, SEL _cmd, long style, id locale)
+{
+	(void)_cmd;
+	/* THE TWO STYLE ENUMS ARE THE SAME SIX CASES WITH THE SAME VALUES, which is why this is a cast:
+	 * NSTimeZoneNameStyleStandard is 0 in Foundation and kCFTimeZoneNameStyleStandard is 0 in Core
+	 * Foundation, and so on to ShortGeneric at 5. */
+	return [(id)CFTimeZoneCopyLocalizedName((CFTimeZoneRef)self, (CFTimeZoneNameStyle)style,
+						(CFLocaleRef)locale) autorelease];
+}
+
+static id cf_imp_timezone_data(id self, SEL _cmd)
+{
+	(void)_cmd;
+	/* Core Foundation's own answer, and NULL is one of them: a zone created by NAME was given no data.
+	 * The base class SYNTHESIZES one for that case in a format of its own ('name|seconds'), which is
+	 * Foundation's business and not Core Foundation's -- so no equivalent is repeated here. */
+	return (id)CFTimeZoneGetData((CFTimeZoneRef)self);
+}
+
+static const cf_own_method cf_timezone_methods[] = {
+	{ "name", (IMP)cf_imp_timezone_name, "@@:" },
+	{ "secondsFromGMTForDate:", (IMP)cf_imp_timezone_seconds_from_gmt, "q@:@" },
+	{ "isDaylightSavingTimeForDate:", (IMP)cf_imp_timezone_is_dst, "C@:@" },
+	{ "nextDaylightSavingTimeTransitionAfterDate:", (IMP)cf_imp_timezone_next_transition, "@@:@" },
+	{ "abbreviationForDate:", (IMP)cf_imp_timezone_abbreviation, "@@:@" },
+	{ "daylightSavingTimeOffsetForDate:", (IMP)cf_imp_timezone_dst_offset, "d@:@" },
+	{ "localizedName:locale:", (IMP)cf_imp_timezone_localized_name, "@@:q@" },
+	{ "data", (IMP)cf_imp_timezone_data, "@@:" },
+	{ NULL, NULL, NULL },
+};
+
+/* NSURL PRIMITIVES, AND THERE ARE TWELVE OF THEM -- the largest set any type has needed, and the reason
+ * is the same one NSTimeZone had: NSURL is NOT a class cluster, so this class IS the class with the
+ * storage, and its accessors read ten ivars between them. What made the list as short as twelve is the
+ * other half of the job, which had to be done in libagora-base first: every method that read those ivars
+ * a SECOND time now reads them through these -- the speller (fnURLWithPath:, and so the whole
+ * -URLByAppendingPathComponent: family), -isEqual:, -hash, -description, -resourceSpecifier,
+ * -relativePath, -parameterString, -standardizedURL, -hasDirectoryPath, -path (which decodes
+ * -fnEncodedPath), and the resource-value doors.
+ *
+ * TWO OF THEM NEED A WORD, because they are not the Core Foundation door that looks right:
+ *
+ * -query AND -fragment ARE TAKEN FROM THE URL'S OWN STRING, not from CFURLCopyQueryString/
+ * CFURLCopyFragment: THOSE TWO UNESCAPE WHAT THEY RETURN, while this side of the bridge answers the
+ * spelling as it stands -- the base class reads the component out of the URL string and leaves the
+ * percent-escapes in it. Handing back a decoded query where a Foundation URL hands back an encoded one
+ * would be a difference no caller could see coming, so the component is cut out between its delimiters.
+ *
+ * -fnCache ANSWERS NIL, AND THAT IS THE ONE PRIMITIVE WITH NO CORE FOUNDATION COUNTERPART: a CFURL has no
+ * cache of measured resource values, and Core Foundation's own resource lookup goes to the file system.
+ * The doors in libagora-base now go through this method rather than through the ivar, so nil reads as
+ * "nothing was cached" rather than as uninitialised storage. */
+
+/* THE +1-TO-+0 HELPER, SHARED BY EVERY ROW THAT NEEDS IT. A Copy-shaped Core Foundation door answers +1
+ * and the methods in this table answer +0, so the owned object goes to -autorelease -- which for these
+ * classes defers to the runtime's pool and drains into CFRelease (see the retain family above for why
+ * that is now a release rather than the no-op it used to be). CFError's -userInfo needs the same step on
+ * a dictionary, which is why the parameter is a CFTypeRef and not a CFStringRef. */
+static id cf_bridge_autorelease(CFTypeRef owned)
+{
+	return owned == NULL ? nil : [(id)owned autorelease];
+}
+
+static id cf_imp_url_absolute_string(id self, SEL _cmd)
+{
+	(void)_cmd;
+	/* GET, SO NOT OWNED: the URL's own string, which is what the base class's -absoluteString answers. */
+	return (id)CFURLGetString((CFURLRef)self);
+}
+
+static id cf_imp_url_encoded_path(id self, SEL _cmd)
+{
+	(void)_cmd;
+	/* CFURLCopyPath IS THE ENCODED SPELLING, which is the primitive side of this library's rule: -path
+	 * decodes it. Nil for an opaque URL, and -path turns that into the empty string the base class
+	 * documents. */
+	return cf_bridge_autorelease(CFURLCopyPath((CFURLRef)self));
+}
+
+static id cf_imp_url_scheme(id self, SEL _cmd)
+{
+	(void)_cmd;
+	return cf_bridge_autorelease(CFURLCopyScheme((CFURLRef)self));
+}
+
+static id cf_imp_url_host(id self, SEL _cmd)
+{
+	(void)_cmd;
+	return cf_bridge_autorelease(CFURLCopyHostName((CFURLRef)self));
+}
+
+static id cf_imp_url_user(id self, SEL _cmd)
+{
+	(void)_cmd;
+	return cf_bridge_autorelease(CFURLCopyUserName((CFURLRef)self));
+}
+
+static id cf_imp_url_password(id self, SEL _cmd)
+{
+	(void)_cmd;
+	return cf_bridge_autorelease(CFURLCopyPassword((CFURLRef)self));
+}
+
+static id cf_imp_url_port(id self, SEL _cmd)
+{
+	SInt32 port = CFURLGetPortNumber((CFURLRef)self);
+
+	(void)_cmd;
+	/* MINUS ONE IS "NO PORT" (CFURL.h), and nil is this method's answer for it. The number is made with
+	 * Core Foundation's own constructor: a CFNumber IS an NSNumber through this bridge, and CFNumber's
+	 * owned class already answers -intValue. */
+	return port < 0 ? nil : [(id)CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt32Type, &port) autorelease];
+}
+
+/* THE QUERY AND THE FRAGMENT, CUT OUT OF THE URL'S STRING -- see the note above. The terminator is the
+ * delimiter of the component that FOLLOWS (a fragment ends the query); NULL means "to the end". */
+static id cf_imp_url_component(id self, CFStringRef separator, CFStringRef terminator)
+{
+	CFStringRef whole = CFURLGetString((CFURLRef)self);
+	CFIndex length;
+	CFRange found;
+	CFRange tail;
+	CFStringRef piece;
+
+	if (whole == NULL) {
+		return nil;
+	}
+	length = CFStringGetLength(whole);
+	tail = CFRangeMake(0, length);
+	if (!CFStringFindWithOptions(whole, separator, tail, 0, &found)) {
+		return nil;
+	}
+	tail = CFRangeMake(found.location + found.length, length - (found.location + found.length));
+	piece = NULL;
+	if (terminator != NULL) {
+		CFRange end;
+
+		if (CFStringFindWithOptions(whole, terminator, tail, 0, &end)) {
+			piece = CFStringCreateWithSubstring(kCFAllocatorDefault, whole,
+							    CFRangeMake(tail.location, end.location - tail.location));
+		}
+	}
+	if (piece == NULL) {
+		piece = CFStringCreateWithSubstring(kCFAllocatorDefault, whole, tail);
+	}
+	return cf_bridge_autorelease(piece);
+}
+
+static id cf_imp_url_query(id self, SEL _cmd)
+{
+	(void)_cmd;
+	return cf_imp_url_component(self, CFSTR("?"), CFSTR("#"));
+}
+
+static id cf_imp_url_fragment(id self, SEL _cmd)
+{
+	(void)_cmd;
+	return cf_imp_url_component(self, CFSTR("#"), NULL);
+}
+
+static char cf_imp_url_is_file(id self, SEL _cmd)
+{
+	(void)_cmd;
+	return (char)(_CFURLIsFileURL((CFURLRef)self) ? 1 : 0);
+}
+
+static id cf_imp_url_no_cache(id self, SEL _cmd)
+{
+	(void)self;
+	(void)_cmd;
+	return nil;	/* a CFURL caches nothing: see the note above */
+}
+
+static const cf_own_method cf_url_methods[] = {
+	{ "fnEncodedPath", (IMP)cf_imp_url_encoded_path, "@@:" },
+	{ "scheme", (IMP)cf_imp_url_scheme, "@@:" },
+	{ "host", (IMP)cf_imp_url_host, "@@:" },
+	{ "user", (IMP)cf_imp_url_user, "@@:" },
+	{ "password", (IMP)cf_imp_url_password, "@@:" },
+	{ "port", (IMP)cf_imp_url_port, "@@:" },
+	{ "query", (IMP)cf_imp_url_query, "@@:" },
+	{ "fragment", (IMP)cf_imp_url_fragment, "@@:" },
+	{ "absoluteString", (IMP)cf_imp_url_absolute_string, "@@:" },
+	{ "relativeString", (IMP)cf_imp_url_absolute_string, "@@:" },
+	{ "isFileURL", (IMP)cf_imp_url_is_file, "C@:" },
+	{ "fnCache", (IMP)cf_imp_url_no_cache, "@@:" },
+	{ NULL, NULL, NULL },
+};
+
+/* NSLocale PRIMITIVES, AND THERE IS EXACTLY ONE -- the shortest row in this table, and the one that shows
+ * what the table is FOR. NSLocale is a single class with a single ivar (the canonical identifier), so
+ * libagora-base needed ONE method routed through `self` (see NSLocale.m) and every other door on the
+ * class -- the language, script, region and variant codes, the ICU-backed display names and currency and
+ * number symbols, the separators, -isEqual:, -hash, -description -- rides on it. That is the same shape
+ * CFDate and CFNull have at the other end of the scale: what a type costs is the size of its PRIMITIVE
+ * set, and this one's is one. */
+static id cf_imp_locale_identifier(id self, SEL _cmd)
+{
+	(void)_cmd;
+	return (id)CFLocaleGetIdentifier((CFLocaleRef)self);
+}
+
+static const cf_own_method cf_locale_methods[] = {
+	{ "localeIdentifier", (IMP)cf_imp_locale_identifier, "@@:" },
+	{ NULL, NULL, NULL },
+};
+
+/* NSError PRIMITIVES, AND THERE ARE THREE -- the three ivars the class has. NSLocale was one and this is
+ * three, and the same rule holds: -localizedDescription, -localizedFailureReason, the underlying-error
+ * walks, -isEqual:, -hash, -description and the coder doors are all written over these, so a Core
+ * Foundation-owned error inherits them. */
+static id cf_imp_error_domain(id self, SEL _cmd)
+{
+	(void)_cmd;
+	/* GET, SO NOT OWNED. */
+	return (id)CFErrorGetDomain((CFErrorRef)self);
+}
+
+static long cf_imp_error_code(id self, SEL _cmd)
+{
+	(void)_cmd;
+	return (long)CFErrorGetCode((CFErrorRef)self);
+}
+
+static id cf_imp_error_user_info(id self, SEL _cmd)
+{
+	(void)_cmd;
+	/* COPY-SHAPED, and Core Foundation answers with an EMPTY dictionary rather than NULL when the error
+	 * carries none -- which is a better answer than the base class gives for that case and the one the
+	 * owned class will answer. */
+	return cf_bridge_autorelease((CFTypeRef)CFErrorCopyUserInfo((CFErrorRef)self));
+}
+
+static const cf_own_method cf_error_methods[] = {
+	{ "domain", (IMP)cf_imp_error_domain, "@@:" },
+	{ "code", (IMP)cf_imp_error_code, "q@:" },
+	{ "userInfo", (IMP)cf_imp_error_user_info, "@@:" },
+	{ NULL, NULL, NULL },
+};
+
+/* NSAttributedString PRIMITIVES, AND THERE ARE TWO -- the string and the run table's read door. NSAttributedString
+ * is not a class cluster: it is one class whose runs are its own storage, so libagora-base needed those two routed
+ * through `self` and nothing else, because every remaining reader of the run table turned out to be a run-table
+ * INTERNAL (`fnRunAt:`, `fnSplitAt:`, `fnReserve:`, ...) or an initialiser -- and the four public methods that
+ * walked the table directly (`-initWithAttributedString:`, `-attributedSubstringFromRange:`,
+ * -enumerateAttributesInRange:options:usingBlock:` and `-encodeWithCoder:`) now walk the PRIMITIVE instead.
+ *
+ * THE MUTABLE HALF IS NOT COVERED AND CANNOT BE FROM HERE, the same limitation CFArray's note describes: a
+ * CFAttributedStringRef and a CFMutableAttributedStringRef share ONE type id, so an owned class cannot tell them
+ * apart, and a CFMutableAttributedString would answer -replaceCharactersInRange:withString: with an inherited
+ * NSMutableAttributedString implementation reading Core Foundation storage.
+ *
+ * NO PRIVATE DOOR IS NEEDED, WHICH IS WHAT MADE THIS TYPE THE CHEAPEST OF THE SIX LEFT: the one selector Core
+ * Foundation asks for that base had not already written (_createAttributedSubstringWithRange:) was implemented in
+ * a previous pass. */
+static id cf_imp_attributed_string(id self, SEL _cmd)
+{
+	(void)_cmd;
+	/* GET, SO NOT OWNED. */
+	return (id)CFAttributedStringGetString((CFAttributedStringRef)self);
+}
+
+/* THE RANGE IS FILLED FIELD BY FIELD rather than by handing Core Foundation the caller's pointer: the caller may
+ * pass NULL for it (both sides allow that), and one local out-parameter covers both cases in one call. */
+static id cf_imp_attributed_attributes(id self, SEL _cmd, unsigned long location, NSRange *effectiveRange)
+{
+	CFRange range = CFRangeMake(0, 0);
+	CFDictionaryRef attributes;
+
+	(void)_cmd;
+	attributes = CFAttributedStringGetAttributes((CFAttributedStringRef)self, (CFIndex)location, &range);
+	if (effectiveRange != NULL) {
+		effectiveRange->location = (unsigned long)range.location;
+		effectiveRange->length = (unsigned long)range.length;
+	}
+	return (id)attributes;
+}
+
+static const cf_own_method cf_attributed_string_methods[] = {
+	{ "string", (IMP)cf_imp_attributed_string, "@@:" },
+	{ "attributesAtIndex:effectiveRange:", (IMP)cf_imp_attributed_attributes, "@@:Q^{_NSRange=QQ}" },
+	{ NULL, NULL, NULL },
+};
+
+/* NSCharacterSet PRIMITIVES, AND THERE ARE SIX -- membership, the plane question, and the three doors that
+ * answer with a WHOLE SET (the bitmap, the inverse, the mutable copy). Two of the six are the pair Core
+ * Foundation asks for by name (longCharacterIsMember:, hasMemberInPlane:); the other four are what
+ * libagora-base's own doors are written over: -characterIsMember: (the unichar form), -bitmapRepresentation,
+ * -invertedSet and -mutableCopy. -description and -encodeWithCoder: are NOT here, and that is deliberate:
+ * they read the ranges back out of -bitmapRepresentation, which is the one shape both sides can produce --
+ * see fn_ranges_from_bitmap in NSCharacterSet.m.
+ *
+ * THE BITMAP FORMAT IS CORE FOUNDATION'S, WHICH WAS A DECISION RATHER THAN A DETAIL: this library used to
+ * emit an annotated form (magic word, range count, then the bits) and now emits the bare 8192-byte plane-0
+ * bitmap. base still ACCEPTS the old form on the way in, so nothing stored breaks, and the round trip no
+ * longer depends on which side produced the bytes. */
+static char cf_imp_charset_character_member(id self, SEL _cmd, unsigned short character)
+{
+	(void)_cmd;
+	return (char)(CFCharacterSetIsCharacterMember((CFCharacterSetRef)self, (UniChar)character) ? 1 : 0);
+}
+
+static char cf_imp_charset_long_character_member(id self, SEL _cmd, unsigned int character)
+{
+	(void)_cmd;
+	return (char)(CFCharacterSetIsLongCharacterMember((CFCharacterSetRef)self, (UTF32Char)character) ? 1 : 0);
+}
+
+static char cf_imp_charset_member_in_plane(id self, SEL _cmd, unsigned char plane)
+{
+	(void)_cmd;
+	return (char)(CFCharacterSetHasMemberInPlane((CFCharacterSetRef)self, (uint8_t)plane) ? 1 : 0);
+}
+
+static id cf_imp_charset_bitmap(id self, SEL _cmd)
+{
+	(void)_cmd;
+	return cf_bridge_autorelease((CFTypeRef)CFCharacterSetCreateBitmapRepresentation(kCFAllocatorDefault,
+											 (CFCharacterSetRef)self));
+}
+
+static id cf_imp_charset_inverted(id self, SEL _cmd)
+{
+	(void)_cmd;
+	return cf_bridge_autorelease((CFTypeRef)CFCharacterSetCreateInvertedSet(kCFAllocatorDefault,
+										(CFCharacterSetRef)self));
+}
+
+static id cf_imp_charset_mutable_copy(id self, SEL _cmd)
+{
+	(void)_cmd;
+	return cf_bridge_autorelease((CFTypeRef)CFCharacterSetCreateMutableCopy(kCFAllocatorDefault,
+									        (CFCharacterSetRef)self));
+}
+
+static const cf_own_method cf_charset_methods[] = {
+	{ "characterIsMember:", (IMP)cf_imp_charset_character_member, "C@:S" },
+	{ "longCharacterIsMember:", (IMP)cf_imp_charset_long_character_member, "C@:I" },
+	{ "hasMemberInPlane:", (IMP)cf_imp_charset_member_in_plane, "C@:C" },
+	{ "bitmapRepresentation", (IMP)cf_imp_charset_bitmap, "@@:" },
+	{ "invertedSet", (IMP)cf_imp_charset_inverted, "@@:" },
+	{ "mutableCopy", (IMP)cf_imp_charset_mutable_copy, "@@:" },
+	{ NULL, NULL, NULL },
+};
+
+/* THE TWO STREAM TYPES, AND THIS PAIR IS THE SHORTEST JOB IN THE WHOLE TABLE -- BECAUSE THE CONTRACT ALREADY
+ * COVERS THE STORAGE. Every method on NSInputStream/NSOutputStream that reads the stream's own ivars
+ * (-read:maxLength:, -getBuffer:length:, -hasBytesAvailable, -propertyForKey:, -setProperty:forKey:, -open,
+ * -close) is ALSO the method Core Foundation asks for by name, so nothing in libagora-base had to be routed
+ * through `self` for these two: the table below IS the routing.
+ *
+ * THE TWO EXCEPTIONS ARE FOUNDATION'S OWN, and they answer what is TRUE of a Core Foundation stream seen
+ * through them. -fnStreamDescriptor and -fnStreamEventForReadiness are what Foundation's run-loop integration
+ * asks a stream for; a CF stream has neither, because Core Foundation's own run loop is what watches it. -1
+ * and NSStreamEventNone are the answers an unopened Foundation stream gives as well -- so a CF stream simply
+ * never looks ready to Foundation's loop, which is the honest answer rather than a wrong file descriptor.
+ *
+ * -_cfStreamError AND -streamError ARE NOT HERE, and that is a gap on the OTHER side of the bridge rather than
+ * this one: libagora-base implements neither, so Core Foundation's dispatch to them raises for a FOUNDATION
+ * stream today. Nothing in this direction needs them. */
+static unsigned long cf_imp_read_stream_status(id self, SEL _cmd)
+{
+	(void)_cmd;
+	return (unsigned long)CFReadStreamGetStatus((CFReadStreamRef)self);
+}
+
+static long cf_imp_read_stream_read(id self, SEL _cmd, char *buffer, unsigned long length)
+{
+	(void)_cmd;
+	return (long)CFReadStreamRead((CFReadStreamRef)self, (UInt8 *)buffer, (CFIndex)length);
+}
+
+static char cf_imp_read_stream_has_bytes(id self, SEL _cmd)
+{
+	(void)_cmd;
+	return (char)(CFReadStreamHasBytesAvailable((CFReadStreamRef)self) ? 1 : 0);
+}
+
+/* CFReadStreamGetBuffer ANSWERS THE POINTER AND WRITES THE COUNT, while this method answers a BOOLEAN and
+ * writes both -- the same question in two shapes, so the answer is the pointer's non-nullness. The caller's
+ * incoming `*length` is the most it wants to read, which is exactly Core Foundation's maxBytesToRead. */
+static char cf_imp_read_stream_get_buffer(id self, SEL _cmd, const unsigned char **buffer, unsigned long *length)
+{
+	CFIndex used = 0;
+	const UInt8 *bytes;
+
+	(void)_cmd;
+	bytes = CFReadStreamGetBuffer((CFReadStreamRef)self, (CFIndex)(length != NULL ? *length : 0), &used);
+	if (bytes == NULL) {
+		return 0;
+	}
+	if (buffer != NULL) {
+		*buffer = bytes;
+	}
+	if (length != NULL) {
+		*length = (unsigned long)used;
+	}
+	return 1;
+}
+
+static id cf_imp_read_stream_property(id self, SEL _cmd, id key)
+{
+	(void)_cmd;
+	return cf_bridge_autorelease(CFReadStreamCopyProperty((CFReadStreamRef)self, (CFStringRef)key));
+}
+
+static char cf_imp_read_stream_set_property(id self, SEL _cmd, id property, id key)
+{
+	(void)_cmd;
+	return (char)(CFReadStreamSetProperty((CFReadStreamRef)self, (CFStringRef)key, (CFTypeRef)property) ? 1 : 0);
+}
+
+static void cf_imp_read_stream_open(id self, SEL _cmd)
+{
+	(void)_cmd;
+	(void)CFReadStreamOpen((CFReadStreamRef)self);
+}
+
+static void cf_imp_read_stream_close(id self, SEL _cmd)
+{
+	(void)_cmd;
+	CFReadStreamClose((CFReadStreamRef)self);
+}
+
+static int cf_imp_stream_no_descriptor(id self, SEL _cmd)
+{
+	(void)self;
+	(void)_cmd;
+	return -1;	/* see the note above: a CF stream has no descriptor for Foundation's loop */
+}
+
+static unsigned long cf_imp_read_stream_event(id self, SEL _cmd)
+{
+	(void)self;
+	(void)_cmd;
+	return 0;	/* NSStreamEventNone */
+}
+
+static const cf_own_method cf_read_stream_methods[] = {
+	{ "streamStatus", (IMP)cf_imp_read_stream_status, "Q@:" },
+	{ "read:maxLength:", (IMP)cf_imp_read_stream_read, "q@:*Q" },
+	{ "hasBytesAvailable", (IMP)cf_imp_read_stream_has_bytes, "C@:" },
+	{ "getBuffer:length:", (IMP)cf_imp_read_stream_get_buffer, "C@:^*^Q" },
+	{ "propertyForKey:", (IMP)cf_imp_read_stream_property, "@@:@" },
+	{ "setProperty:forKey:", (IMP)cf_imp_read_stream_set_property, "C@:@@" },
+	{ "open", (IMP)cf_imp_read_stream_open, "v@:" },
+	{ "close", (IMP)cf_imp_read_stream_close, "v@:" },
+	{ "fnStreamDescriptor", (IMP)cf_imp_stream_no_descriptor, "i@:" },
+	{ "fnStreamEventForReadiness", (IMP)cf_imp_read_stream_event, "Q@:" },
+	{ NULL, NULL, NULL },
+};
+
+static unsigned long cf_imp_write_stream_status(id self, SEL _cmd)
+{
+	(void)_cmd;
+	return (unsigned long)CFWriteStreamGetStatus((CFWriteStreamRef)self);
+}
+
+static long cf_imp_write_stream_write(id self, SEL _cmd, const char *buffer, unsigned long length)
+{
+	(void)_cmd;
+	return (long)CFWriteStreamWrite((CFWriteStreamRef)self, (const UInt8 *)buffer, (CFIndex)length);
+}
+
+static char cf_imp_write_stream_has_space(id self, SEL _cmd)
+{
+	(void)_cmd;
+	/* CORE FOUNDATION CALLS THIS CanAcceptBytes, and it is the same question: whether a write would block. */
+	return (char)(CFWriteStreamCanAcceptBytes((CFWriteStreamRef)self) ? 1 : 0);
+}
+
+static id cf_imp_write_stream_property(id self, SEL _cmd, id key)
+{
+	(void)_cmd;
+	return cf_bridge_autorelease(CFWriteStreamCopyProperty((CFWriteStreamRef)self, (CFStringRef)key));
+}
+
+static char cf_imp_write_stream_set_property(id self, SEL _cmd, id property, id key)
+{
+	(void)_cmd;
+	return (char)(CFWriteStreamSetProperty((CFWriteStreamRef)self, (CFStringRef)key, (CFTypeRef)property) ? 1 : 0);
+}
+
+static void cf_imp_write_stream_open(id self, SEL _cmd)
+{
+	(void)_cmd;
+	(void)CFWriteStreamOpen((CFWriteStreamRef)self);
+}
+
+static void cf_imp_write_stream_close(id self, SEL _cmd)
+{
+	(void)_cmd;
+	CFWriteStreamClose((CFWriteStreamRef)self);
+}
+
+static const cf_own_method cf_write_stream_methods[] = {
+	{ "streamStatus", (IMP)cf_imp_write_stream_status, "Q@:" },
+	{ "write:maxLength:", (IMP)cf_imp_write_stream_write, "q@:r*Q" },
+	{ "hasSpaceAvailable", (IMP)cf_imp_write_stream_has_space, "C@:" },
+	{ "propertyForKey:", (IMP)cf_imp_write_stream_property, "@@:@" },
+	{ "setProperty:forKey:", (IMP)cf_imp_write_stream_set_property, "C@:@@" },
+	{ "open", (IMP)cf_imp_write_stream_open, "v@:" },
+	{ "close", (IMP)cf_imp_write_stream_close, "v@:" },
+	{ "fnStreamDescriptor", (IMP)cf_imp_stream_no_descriptor, "i@:" },
+	{ NULL, NULL, NULL },
+};
+
+/* NSTimer PRIMITIVES, AND THERE ARE TEN -- six that Core Foundation asks for by name (timeInterval, isValid,
+ * invalidate, tolerance, setTolerance:), three that libagora-base's own doors are written over (fireDate and
+ * setFireDate: through CFRunLoopTimerGet/SetNextFireDate, and fnRepeats, the private accessor -description
+ * reads) and ONE that has no Core Foundation counterpart at all: -userInfo. A CF timer carries a CONTEXT --
+ * a C callback and a pointer -- and not an Objective-C user-info object, so nil is the true answer and not a
+ * stub.
+ *
+ * -fire IS ANSWERED WITH NOTHING, AND THAT IS WORTH SAYING PLAINLY: Core Foundation has no synchronous "fire
+ * this now" door -- a CF timer's callout belongs to Core Foundation's own run loop -- so a caller who asks
+ * this is told, by the absence of any effect, that there was nothing to do. It is the one door here whose
+ * answer is a documented limit rather than a fact about the object.
+ *
+ * NSTimer's OTHER STATE IS NOT HERE BECAUSE IT IS NOT NSTIMER'S: the target/selector pair, the block and the
+ * invocation live on the run loop's own private timer class (see NSRunLoop.m), whose -hasTarget:,
+ * -targetIsAlive and -fireIfAlive are that class's protocol and not this one's -- measured, as
+ * class_getInstanceMethod([NSTimer class], ...) answering nothing for all three. */
+static double cf_imp_timer_interval(id self, SEL _cmd)
+{
+	(void)_cmd;
+	return (double)CFRunLoopTimerGetInterval((CFRunLoopTimerRef)self);
+}
+
+static id cf_imp_timer_fire_date(id self, SEL _cmd)
+{
+	(void)_cmd;
+	/* THE NEXT FIRE DATE IS CORE FOUNDATION'S ANSWER TO THE SAME QUESTION, and the object it comes back in is
+	 * an NSDate -- a CFDate IS one through this bridge. */
+	return [(id)CFDateCreate(kCFAllocatorDefault, CFRunLoopTimerGetNextFireDate((CFRunLoopTimerRef)self))
+		 autorelease];
+}
+
+static void cf_imp_timer_set_fire_date(id self, SEL _cmd, id date)
+{
+	(void)_cmd;
+	if (date != nil) {
+		/* CFDateGetAbsoluteTime IS THE CONVERSION AND IT WORKS ON EITHER SIDE: for a Foundation NSDate it
+		 * dispatches to -timeIntervalSinceReferenceDate, which is the primitive the CFDate owned class
+		 * answers. */
+		CFRunLoopTimerSetNextFireDate((CFRunLoopTimerRef)self, CFDateGetAbsoluteTime((CFDateRef)date));
+	}
+}
+
+static char cf_imp_timer_is_valid(id self, SEL _cmd)
+{
+	(void)_cmd;
+	return (char)(CFRunLoopTimerIsValid((CFRunLoopTimerRef)self) ? 1 : 0);
+}
+
+static void cf_imp_timer_invalidate(id self, SEL _cmd)
+{
+	(void)_cmd;
+	CFRunLoopTimerInvalidate((CFRunLoopTimerRef)self);
+}
+
+static double cf_imp_timer_tolerance(id self, SEL _cmd)
+{
+	(void)_cmd;
+	return (double)CFRunLoopTimerGetTolerance((CFRunLoopTimerRef)self);
+}
+
+static void cf_imp_timer_set_tolerance(id self, SEL _cmd, double tolerance)
+{
+	(void)_cmd;
+	CFRunLoopTimerSetTolerance((CFRunLoopTimerRef)self, (CFTimeInterval)tolerance);
+}
+
+static char cf_imp_timer_repeats(id self, SEL _cmd)
+{
+	(void)_cmd;
+	return (char)(CFRunLoopTimerDoesRepeat((CFRunLoopTimerRef)self) ? 1 : 0);
+}
+
+static id cf_imp_timer_user_info(id self, SEL _cmd)
+{
+	(void)self;
+	(void)_cmd;
+	return nil;	/* a CF timer holds a context, not a user-info object: see the note above */
+}
+
+static void cf_imp_timer_fire(id self, SEL _cmd)
+{
+	(void)self;
+	(void)_cmd;
+
+	/* NOTHING, DELIBERATELY: see the note above. */
+}
+
+static const cf_own_method cf_timer_methods[] = {
+	{ "timeInterval", (IMP)cf_imp_timer_interval, "d@:" },
+	{ "fireDate", (IMP)cf_imp_timer_fire_date, "@@:" },
+	{ "setFireDate:", (IMP)cf_imp_timer_set_fire_date, "v@:@" },
+	{ "isValid", (IMP)cf_imp_timer_is_valid, "C@:" },
+	{ "invalidate", (IMP)cf_imp_timer_invalidate, "v@:" },
+	{ "tolerance", (IMP)cf_imp_timer_tolerance, "d@:" },
+	{ "setTolerance:", (IMP)cf_imp_timer_set_tolerance, "v@:d" },
+	{ "fnRepeats", (IMP)cf_imp_timer_repeats, "C@:" },
+	{ "userInfo", (IMP)cf_imp_timer_user_info, "@@:" },
+	{ "fire", (IMP)cf_imp_timer_fire, "v@:" },
+	{ NULL, NULL, NULL },
+};
+
+/* NSCalendar PRIMITIVES, AND THERE ARE NINE -- FIVE READS AND FOUR WRITES, WHICH IS THE WHOLE STATE THE CLASS
+ * HAS. NSCalendar is not a class cluster and keeps no computation cache: its ivars are the identifier, the
+ * time zone, the locale and two week-boundary numbers, and EVERYTHING ELSE -- the component conversion, the
+ * range and ordinality arithmetic, the symbol tables, the weekend logic, all of it ICU-backed -- is written
+ * over the five accessors. That routing is libagora-base's half of this type, and it is what lets a Core
+ * Foundation-owned calendar answer the computation doors at all.
+ *
+ * AND THIS ROW IS NOT VERIFIED, WHICH IS A FACT ABOUT CORE FOUNDATION RATHER THAN ABOUT THIS TABLE: a Core
+ * Foundation calendar cannot be CONSTRUCTED in this environment at all. CFCalendarCreateWithIdentifier reaches
+ * _CFCalendarInitialize, which asks CFTimeZoneCopyDefault for the current zone, and CFTimeZoneCopySystem
+ * SEGFAULTS inside libc -- measured, with a backtrace carrying no Objective-C frame, and IT SURVIVES WITH THIS
+ * ROW REMOVED, so it is a pre-existing defect of Core Foundation's system-zone lookup and not anything here.
+ * (libagora-base handles the same environment: its +systemTimeZone answers GMT for ICU's "Etc/Unknown", which
+ * is what a system with no /etc/localtime and no TZ means.) Every entry below is measured and compiled in, but
+ * no case in the suite can reach them until that lookup is fixed -- the reverse-direction case that belongs
+ * here is owed with it.
+ *
+ * THE PRIVATE ...atp DOORS ARE ALSO NOT HERE, AND THAT GAP IS ON THE OTHER SIDE OF THE BRIDGE: Core
+ * Foundation's composition and decomposition doors dispatch to _composeAbsoluteTime:atp,
+ * _decomposeAbsoluteTime:at, _addComponents:atp and their neighbours, which libagora-base does not implement
+ * -- so those FORWARD doors raise for a Foundation calendar. Nothing in this direction needs them. */
+static id cf_imp_calendar_identifier(id self, SEL _cmd)
+{
+	(void)_cmd;
+	return (id)CFCalendarGetIdentifier((CFCalendarRef)self);
+}
+
+static id cf_imp_calendar_time_zone(id self, SEL _cmd)
+{
+	(void)_cmd;
+	return cf_bridge_autorelease((CFTypeRef)CFCalendarCopyTimeZone((CFCalendarRef)self));
+}
+
+static id cf_imp_calendar_locale(id self, SEL _cmd)
+{
+	(void)_cmd;
+	return cf_bridge_autorelease((CFTypeRef)CFCalendarCopyLocale((CFCalendarRef)self));
+}
+
+static unsigned long cf_imp_calendar_first_weekday(id self, SEL _cmd)
+{
+	(void)_cmd;
+	return (unsigned long)CFCalendarGetFirstWeekday((CFCalendarRef)self);
+}
+
+static unsigned long cf_imp_calendar_minimum_days(id self, SEL _cmd)
+{
+	(void)_cmd;
+	return (unsigned long)CFCalendarGetMinimumDaysInFirstWeek((CFCalendarRef)self);
+}
+
+static void cf_imp_calendar_set_time_zone(id self, SEL _cmd, id zone)
+{
+	(void)_cmd;
+	CFCalendarSetTimeZone((CFCalendarRef)self, (CFTimeZoneRef)zone);
+}
+
+static void cf_imp_calendar_set_locale(id self, SEL _cmd, id locale)
+{
+	(void)_cmd;
+	CFCalendarSetLocale((CFCalendarRef)self, (CFLocaleRef)locale);
+}
+
+static void cf_imp_calendar_set_first_weekday(id self, SEL _cmd, unsigned long weekday)
+{
+	(void)_cmd;
+	CFCalendarSetFirstWeekday((CFCalendarRef)self, (CFIndex)weekday);
+}
+
+static void cf_imp_calendar_set_minimum_days(id self, SEL _cmd, unsigned long days)
+{
+	(void)_cmd;
+	CFCalendarSetMinimumDaysInFirstWeek((CFCalendarRef)self, (CFIndex)days);
+}
+
+static const cf_own_method cf_calendar_methods[] = {
+	{ "calendarIdentifier", (IMP)cf_imp_calendar_identifier, "@@:" },
+	{ "timeZone", (IMP)cf_imp_calendar_time_zone, "@@:" },
+	{ "locale", (IMP)cf_imp_calendar_locale, "@@:" },
+	{ "firstWeekday", (IMP)cf_imp_calendar_first_weekday, "Q@:" },
+	{ "minimumDaysInFirstWeek", (IMP)cf_imp_calendar_minimum_days, "Q@:" },
+	{ "setTimeZone:", (IMP)cf_imp_calendar_set_time_zone, "v@:@" },
+	{ "setLocale:", (IMP)cf_imp_calendar_set_locale, "v@:@" },
+	{ "setFirstWeekday:", (IMP)cf_imp_calendar_set_first_weekday, "v@:Q" },
+	{ "setMinimumDaysInFirstWeek:", (IMP)cf_imp_calendar_set_minimum_days, "v@:Q" },
+	{ NULL, NULL, NULL },
+};
+
 static const struct {
 	CFTypeID type;
 	const char *name;
 	const cf_own_method *methods;
 } cf_own_classes[] = {
-	{ _kCFRuntimeIDCFString, "__NSCFString", cf_string_methods },
-	{ _kCFRuntimeIDCFDate,   "__NSCFDate",   cf_date_methods },
-	{ _kCFRuntimeIDCFNumber, "__NSCFNumber", cf_number_methods },
-	{ _kCFRuntimeIDCFArray,  "__NSCFArray",  cf_array_methods },
+	{ _kCFRuntimeIDCFString,     "__NSCFString",     cf_string_methods },
+	{ _kCFRuntimeIDCFDate,       "__NSCFDate",       cf_date_methods },
+	{ _kCFRuntimeIDCFNumber,     "__NSCFNumber",     cf_number_methods },
+	{ _kCFRuntimeIDCFArray,      "__NSCFArray",      cf_array_methods },
+	{ _kCFRuntimeIDCFData,       "__NSCFData",       cf_data_methods },
+	{ _kCFRuntimeIDCFDictionary, "__NSCFDictionary", cf_dictionary_methods },
+	{ _kCFRuntimeIDCFSet,        "__NSCFSet",        cf_set_methods },
+	{ _kCFRuntimeIDCFNull,       "__NSCFNull",       cf_null_methods },
+	{ _kCFRuntimeIDCFTimeZone,   "__NSCFTimeZone",   cf_timezone_methods },
+	{ _kCFRuntimeIDCFURL,        "__NSCFURL",        cf_url_methods },
+	{ _kCFRuntimeIDCFLocale,     "__NSCFLocale",     cf_locale_methods },
+	{ _kCFRuntimeIDCFError,      "__NSCFError",      cf_error_methods },
+	{ _kCFRuntimeIDCFAttributedString, "__NSCFAttributedString", cf_attributed_string_methods },
+	{ _kCFRuntimeIDCFCharacterSet, "__NSCFCharacterSet", cf_charset_methods },
+	{ _kCFRuntimeIDCFReadStream, "__NSCFReadStream", cf_read_stream_methods },
+	{ _kCFRuntimeIDCFWriteStream, "__NSCFWriteStream", cf_write_stream_methods },
+	{ _kCFRuntimeIDCFRunLoopTimer, "__NSCFRunLoopTimer", cf_timer_methods },
+	{ _kCFRuntimeIDCFCalendar, "__NSCFCalendar", cf_calendar_methods },
 	{ 0, NULL, NULL },
 };
 #endif /* __OBJC__ */
@@ -663,7 +1726,23 @@ static uintptr_t cf_bridged_subclass(CFTypeID typeID, const void *cls_ref)
 	for (size_t i = 0; methods != NULL && methods[i].name != NULL; i++) {
 		class_addMethod(sub, sel_registerName(methods[i].name), methods[i].imp, methods[i].types);
 	}
+	/* AND THE RETAIN FAMILY, WHICH IS THE SAME THREE METHODS ON EVERY ONE OF THEM. */
+	for (size_t i = 0; cf_object_methods[i].name != NULL; i++) {
+		class_addMethod(sub, sel_registerName(cf_object_methods[i].name), cf_object_methods[i].imp,
+				cf_object_methods[i].types);
+	}
 	objc_registerClassPair(sub);
+	/* RECORDED AS CORE FOUNDATION'S OWN, which is what CFRetain and CFRelease ask before deciding which
+	 * reference count to touch. */
+	if (__CFRuntimeOwnedClassCount < __CFRuntimeMaxOwnedClasses) {
+		__CFRuntimeOwnedClasses[__CFRuntimeOwnedClassCount++] = (uintptr_t)sub;
+	}
+	/* AND A STATIC INSTANCE OF THIS TYPE GETS THE CLASS WRITTEN INTO IT, because it cannot have named one
+	 * before now: it was initialised at COMPILE time and its isa is a compile-time NULL. kCFNull is the
+	 * only such instance of a bridged type -- see __CFNullBindOwnedClass in CFBase.c. */
+	if (typeID == _kCFRuntimeIDCFNull) {
+		__CFNullBindOwnedClass((void *)sub);
+	}
 	return (uintptr_t)sub;
 }
 #endif
@@ -1058,6 +2137,20 @@ CF_PRIVATE void _CFRuntimeSetInstanceTypeIDAndIsa(CFTypeRef cf, CFTypeID newType
     if (_CFTypeGetClass(cf) != __CFISAForTypeID(newTypeID)) {
         ((CFSwiftRef)cf)->isa = (uintptr_t)__CFISAForTypeID(newTypeID);
     }
+#elif defined(__OBJC__)
+    /* AGORA: THE isa HALF, WHICH THE NON-SWIFT BUILD NEVER HAD AND WHICH THREE TYPES ARE BUILT ON. A
+     * CFDictionary and a CFSet are not created as themselves: they are a CFBasicHash -- pure Core
+     * Foundation, no bridge -- and then RETYPED here (CFDictionary.c, CFSet.c, CFBag.c, CFBinaryPList.c
+     * all come through this door). _CFRuntimeCreateInstance gave that hashtable the class of a type id
+     * that is NOT bridged, which is no class at all, so `[(id)CFDictionaryCreate(...) count]` dereferenced
+     * a zero isa -- measured, as the last two SIGSEGVs in the suite.
+     *
+     * THE OWNED CLASS FOR THE NEW TYPE AND NOT __CFISAForTypeID, for the reason that whole table exists:
+     * the bridge class is FOUNDATION's and would make a Core Foundation object wear it. Guarded on the
+     * object having NO class, so a Foundation object that is ever retyped keeps its own isa. */
+    if (_CFTypeGetClass(cf) == 0) {
+        ((CFRuntimeBase *)cf)->_cfisa = __CFRuntimeCFOwnClassTable[newTypeID];
+    }
 #endif
 }
 
@@ -1274,8 +2367,15 @@ CFTypeRef CFRetain(CFTypeRef cf) {
      * which reads the reference count out of cfinfoa. For a Foundation object that word is its isa, and
      * for a small object it is not an address at all: SIGSEGV in CFRetain with rdi 0xd19766cde000002c.
      * The reference count belongs to whichever side made the object, and a tagged pointer's retain is a
-     * no-op either way. */
-    if (_CFIsAnObject(cf)) {
+     * no-op either way.
+     *
+     * AND CORE FOUNDATION'S OWN OBJECTS ARE NOT BRIDGED OBJECTS, though they wear a class and so arrive
+     * here looking like ones. MEASURED: libobjc2 puts ITS retain count at ((uintptr_t *)cf)[-1], and for a
+     * CFRuntime allocation that word is the malloc chunk header -- 0x41 -> 0x42 under CFRetain -> 0x41
+     * under CFRelease, with Core Foundation's own count never read and the object therefore never freed.
+     * So the test is _CFIsAnObject AND NOT ours: the class decides, because that is where the two
+     * reference counts part company. */
+    if (_CFIsAnObject(cf) && !_CFIsOwnedCFObject(cf)) {
         return (CFTypeRef)objc_retain((void *)cf);
     }
     __CFGenericAssertIsCF(cf);
@@ -1296,8 +2396,10 @@ void _CFNonObjCRelease(CFTypeRef cf) {
 
 void CFRelease(CFTypeRef cf) {
     if (NULL == cf) { CRSetCrashLogMessage("*** CFRelease() called with NULL ***"); HALT; }
-    /* AGORA: and released as one, for the same reason as CFRetain above. */
-    if (_CFIsAnObject(cf)) {
+    /* AGORA: and released as one, for the same reason as CFRetain above -- and with the same exception
+     * for Core Foundation's own objects, which is what stops the malloc chunk header being walked back
+     * down and lets Core Foundation actually free what it made. */
+    if (_CFIsAnObject(cf) && !_CFIsOwnedCFObject(cf)) {
         objc_release((void *)cf);
         return;
     }

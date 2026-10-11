@@ -853,6 +853,12 @@ CF_PRIVATE void _CFIterateDirectory(CFStringRef directoryPath, Boolean appendSla
 
 extern void _CFRuntimeSetInstanceTypeIDAndIsa(CFTypeRef cf, CFTypeID newTypeID);
 
+/* AGORA: WRITES THE OWNED CLASS INTO kCFNull, the one constant instance of a type Foundation bridges --
+ * a compile-time initialiser cannot name a class that does not exist until Foundation registers the
+ * bridge, so it is patched the moment cf_bridged_subclass creates that class. Defined in CFBase.c,
+ * called from CFRuntime.c. */
+CF_PRIVATE void __CFNullBindOwnedClass(void *cls);
+
 #if DEPLOYMENT_RUNTIME_SWIFT
 #define CF_IS_SWIFT(type, obj) (_CFIsSwift(type, (CFSwiftRef)obj))
 
