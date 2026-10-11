@@ -897,7 +897,11 @@ CF_INLINE CFMutableCharacterSetRef __CFCSetGenericCreate(CFAllocatorRef allocato
     CFMutableCharacterSetRef cset;
     CFIndex size = sizeof(struct __CFCharacterSet) - sizeof(CFRuntimeBase);
 
-    cset = (CFMutableCharacterSetRef)_CFRuntimeCreateInstance(allocator, CFCharacterSetGetTypeID(), size, NULL);
+    /* THE CATEGORY, WHICH IS WHAT SAYS THIS INSTANCE IS THE MUTABLE HALF -- and `isMutable` is already a
+     * parameter of this creator, so the two halves were already distinguishable here and only their CLASS
+     * was not. */
+    cset = (CFMutableCharacterSetRef)_CFRuntimeCreateInstance(allocator, CFCharacterSetGetTypeID(), size,
+                                                              isMutable ? (unsigned char *)"CFMutableCharacterSet" : NULL);
     if (NULL == cset) return NULL;
     __CFCSetGenericInit(cset, classType, isMutable);
     return cset;

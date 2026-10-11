@@ -1669,6 +1669,28 @@ static id cf_imp_charset_mutable_copy(id self, SEL _cmd)
 									        (CFCharacterSetRef)self));
 }
 
+static CFCharacterSetRef cf_charset_from_foundation_set(id other);
+
+/* THE COMPARISON DOOR, AND IT WAS MISSING FROM BOTH ROWS. libagora-base writes -isEqual: OVER
+ * -isSupersetOfSet: in both directions (its own NSCharacterSet.h says so), so a Core Foundation-backed set
+ * that does not answer -isSupersetOfSet: falls back to Foundation's implementation, reads FOUNDATION's
+ * range list out of a Core Foundation object, and reports that two equal sets are unequal. MEASURED: that
+ * is what it did, and it PREDATES the mutable half -- the immutable row never had this door, which is why
+ * the immutable case in the suite passes without ever comparing two sets for equality. */
+static unsigned char cf_imp_charset_is_superset(id self, SEL _cmd, id other)
+{
+	CFCharacterSetRef converted;
+	unsigned char answer = 0;
+
+	(void)_cmd;
+	converted = cf_charset_from_foundation_set(other);
+	if (converted != NULL) {
+		answer = CFCharacterSetIsSupersetOfSet((CFCharacterSetRef)self, converted) ? 1 : 0;
+		CFRelease(converted);
+	}
+	return answer;
+}
+
 static const cf_own_method cf_charset_methods[] = {
 	{ "characterIsMember:", (IMP)cf_imp_charset_character_member, "C@:S" },
 	{ "longCharacterIsMember:", (IMP)cf_imp_charset_long_character_member, "C@:I" },
@@ -1676,6 +1698,110 @@ static const cf_own_method cf_charset_methods[] = {
 	{ "bitmapRepresentation", (IMP)cf_imp_charset_bitmap, "@@:" },
 	{ "invertedSet", (IMP)cf_imp_charset_inverted, "@@:" },
 	{ "mutableCopy", (IMP)cf_imp_charset_mutable_copy, "@@:" },
+	{ "isSupersetOfSet:", (IMP)cf_imp_charset_is_superset, "C@:@" },
+	{ NULL, NULL, NULL },
+};
+
+/* ---------------------------------------------------------------------------------------------------- */
+/* THE MUTABLE HALF OF A CHARACTER SET: THE FIVE METHODS THAT TOUCH FOUNDATION'S RANGES                  */
+/* ---------------------------------------------------------------------------------------------------- */
+/* FIVE, AND THEY WERE FOUND BY SCANNING WITH THE REAL FIELD NAMES. libagora-base keeps a character set as
+ * a RANGE LIST (_ranges, _rangeCount, _capacity), and MEASURED -- with those names, uncapped -- exactly
+ * five methods of NSMutableCharacterSet touch it: -formUnionWithCharacterSet:,
+ * -formIntersectionWithCharacterSet:, -invert, -removeCharactersInRange: and -removeCharactersInString:.
+ * The four add/remove-STRING/range doors Foundation also has are DERIVED (they build a set and call one of
+ * these), so they need no entry. The six entries above are the immutable class's own, and a mutable set
+ * must read as well as write.
+ *
+ * AN EARLIER SCAN OF MINE MISSED -removeCharactersInString: AND IT WAS MY PATTERN'S FAULT: I searched for
+ * `_count`, which does not match `_rangeCount`. The list above is what a scan with the class's OWN field
+ * names returns. */
+/* THE OTHER SET ARRIVES AS A FOUNDATION OBJECT, SO IT IS CONVERTED THROUGH THE BITMAP RATHER THAN CAST.
+ * MEASURED, AND IT COST A SEGFAULT: CFCharacterSetUnion reads its second argument as Core Foundation's own
+ * struct, and a Foundation set is not one -- Core Foundation's C doors dispatch for the types whose doors
+ * are bridged, and this one does not. The two sides already agree on the bitmap's format (Core
+ * Foundation's bare 8192-byte plane-0 form, a decision this bridge made earlier), so a Core Foundation set
+ * built from it is the same set, and it is released again immediately. */
+static CFCharacterSetRef cf_charset_from_foundation_set(id other)
+{
+	NSData *bitmap = (other != nil) ? (NSData *)[other bitmapRepresentation] : nil;
+
+	if (bitmap == nil) {
+		return NULL;
+	}
+	return CFCharacterSetCreateWithBitmapRepresentation(NULL, (CFDataRef)bitmap);
+}
+
+static void cf_imp_mutable_charset_form_union(id self, SEL _cmd, id other)
+{
+	CFCharacterSetRef converted;
+
+	(void)_cmd;
+	converted = cf_charset_from_foundation_set(other);
+	if (converted != NULL) {
+		CFCharacterSetUnion((CFMutableCharacterSetRef)self, converted);
+		CFRelease(converted);
+	}
+}
+
+static void cf_imp_mutable_charset_form_intersection(id self, SEL _cmd, id other)
+{
+	CFCharacterSetRef converted;
+
+	(void)_cmd;
+	converted = cf_charset_from_foundation_set(other);
+	if (converted != NULL) {
+		CFCharacterSetIntersect((CFMutableCharacterSetRef)self, converted);
+		CFRelease(converted);
+	}
+}
+
+static void cf_imp_mutable_charset_invert(id self, SEL _cmd)
+{
+	(void)_cmd;
+	CFCharacterSetInvert((CFMutableCharacterSetRef)self);
+}
+
+static void cf_imp_mutable_charset_remove_range(id self, SEL _cmd, NSRange range)
+{
+	(void)_cmd;
+	CFCharacterSetRemoveCharactersInRange((CFMutableCharacterSetRef)self,
+					      CFRangeMake((CFIndex)range.location, (CFIndex)range.length));
+}
+
+static void cf_imp_mutable_charset_add_string(id self, SEL _cmd, id string)
+{
+	(void)_cmd;
+	CFCharacterSetAddCharactersInString((CFMutableCharacterSetRef)self, (CFStringRef)string);
+}
+
+static void cf_imp_mutable_charset_remove_string(id self, SEL _cmd, id string)
+{
+	(void)_cmd;
+	CFCharacterSetRemoveCharactersInString((CFMutableCharacterSetRef)self, (CFStringRef)string);
+}
+
+static id cf_imp_mutable_charset_init(id self, SEL _cmd)
+{
+	(void)_cmd;
+	return self;
+}
+
+static const cf_own_method cf_mutable_charset_methods[] = {
+	{ "characterIsMember:", (IMP)cf_imp_charset_character_member, "C@:S" },
+	{ "longCharacterIsMember:", (IMP)cf_imp_charset_long_character_member, "C@:I" },
+	{ "hasMemberInPlane:", (IMP)cf_imp_charset_member_in_plane, "C@:C" },
+	{ "bitmapRepresentation", (IMP)cf_imp_charset_bitmap, "@@:" },
+	{ "invertedSet", (IMP)cf_imp_charset_inverted, "@@:" },
+	{ "mutableCopy", (IMP)cf_imp_charset_mutable_copy, "@@:" },
+	{ "isSupersetOfSet:", (IMP)cf_imp_charset_is_superset, "C@:@" },
+	{ "formUnionWithCharacterSet:", (IMP)cf_imp_mutable_charset_form_union, "v@:@" },
+	{ "formIntersectionWithCharacterSet:", (IMP)cf_imp_mutable_charset_form_intersection, "v@:@" },
+	{ "invert", (IMP)cf_imp_mutable_charset_invert, "v@:" },
+	{ "removeCharactersInRange:", (IMP)cf_imp_mutable_charset_remove_range, "v@:{_NSRange=QQ}" },
+	{ "addCharactersInString:", (IMP)cf_imp_mutable_charset_add_string, "v@:@" },
+	{ "removeCharactersInString:", (IMP)cf_imp_mutable_charset_remove_string, "v@:@" },
+	{ "init", (IMP)cf_imp_mutable_charset_init, "@@:" },
 	{ NULL, NULL, NULL },
 };
 
@@ -2112,6 +2238,7 @@ static const struct {
 	{ _kCFRuntimeIDCFSet, "__NSCFMutableSet", "NSMutableSet", cf_mutable_set_methods },
 	{ _kCFRuntimeIDCFString, "__NSCFMutableString", "NSMutableString", cf_mutable_string_methods },
 	{ _kCFRuntimeIDCFData, "__NSCFMutableData", "NSMutableData", cf_mutable_data_methods },
+	{ _kCFRuntimeIDCFCharacterSet, "__NSCFMutableCharacterSet", "NSMutableCharacterSet", cf_mutable_charset_methods },
 	{ 0, NULL, NULL, NULL },
 };
 
