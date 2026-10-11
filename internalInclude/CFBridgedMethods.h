@@ -136,7 +136,22 @@ typedef struct __CFString *CFMutableStringRef;
  *
  * NOT MEASURED, AND RECORDED AS SUCH: whether libobjc2 INSTALLS A TRAMPOLINE for a pointer-only
  * difference. Nothing observed needs one -- the byte conversions, the substrings and the URL doors are
- * all correct -- but that is an inference from the type strings, not an instrumented result. */
+ * all correct -- but that is an inference from the type strings, not an instrumented result.
+ *
+ * AND ONE OF THE SEVEN IS NOW FIXED RATHER THAN DOCUMENTED, MEASURED BY COUNTING THE REPORTS. The
+ * -getBytes: family is GONE: its difference was the FIRST PARAMETER, ^v against * -- an ARGUMENT, which
+ * "is not restricted to pointers the way a return value is" -- so the protocol above was changed to spell
+ * that parameter the way libagora-base does, and the reports went from seven to FOUR:
+ *
+ *     Calling [NSCFConstantString -_createSubstringWithRange:]      (and NSConstantString, NSTinyString)
+ *     Calling [NSURL -_cfurl]
+ *
+ * THE FOUR THAT REMAIN DIFFER ONLY IN STRUCT COMPLETENESS ON A RETURNED POINTER, AND THEY CANNOT BE
+ * MATCHED FROM EITHER SIDE: libagora-base sees the opaque typedef, which is Apple's own view and the one
+ * it must keep, while a Core Foundation translation unit that has included CFString.h has the complete
+ * struct and nothing can unsee it. An object pointer is one register whichever way the pointee is spelled,
+ * so these are ABI-identical, and their BEHAVIOUR is measured: a direct -_createSubstringWithRange: on a
+ * CFSTR answers the right substring and every CFURL-on-NSURL door passes. */
 
 #endif /* __OBJC__ */
 
