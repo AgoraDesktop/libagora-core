@@ -2035,7 +2035,10 @@ CF_INLINE CFMutableStringRef __CFStringCreateMutableFunnel(CFAllocatorRef alloc,
     if (alloc == NULL) alloc = __CFGetDefaultAllocator();
 
     // Note that if there is an externalContentsAllocator, then we also have the storage for the string allocator...
-    str = (CFMutableStringRef)_CFRuntimeCreateInstance(alloc, _kCFRuntimeIDCFString, sizeof(struct __notInlineMutable) - (hasExternalContentsAllocator ? 0 : sizeof(CFAllocatorRef)), NULL);
+    /* THE CATEGORY, WHICH IS WHAT SAYS THIS INSTANCE IS THE MUTABLE HALF. This funnel is used ONLY for
+     * mutable strings, so the category belongs here and nowhere else. */
+    str = (CFMutableStringRef)_CFRuntimeCreateInstance(alloc, _kCFRuntimeIDCFString, sizeof(struct __notInlineMutable) - (hasExternalContentsAllocator ? 0 : sizeof(CFAllocatorRef)),
+                                                       (unsigned char *)"CFMutableString");
     if (str) {
         if (__CFOASafe) __CFSetLastAllocationEventName(str, "CFString (mutable)");
 

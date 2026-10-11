@@ -1016,6 +1016,55 @@ static const cf_own_method cf_string_methods[] = {
 	{ NULL, NULL, NULL },
 };
 
+/* ---------------------------------------------------------------------------------------------------- */
+/* THE MUTABLE HALF OF A STRING: THE TWO DOORS THAT WRITE FOUNDATION'S STORAGE                          */
+/* ---------------------------------------------------------------------------------------------------- */
+/* libagora-base's NSString.h DOCUMENTS the contract this rests on: "-byteAtIndex: defaults to a read of
+ * -UTF8String, so a subclass that answers -length, -characterAtIndex: and -UTF8String is correct through
+ * the derived doors without any storage of its own". So the three read doors are the immutable class's
+ * own and are listed here too, and a mutable string adds the two methods of Foundation's mutable string
+ * that WRITE storage: MEASURED, -setString: (8 storage writes) and -appendUTF8String: (14). Everything
+ * else is derived from one of them -- -appendString: calls -appendUTF8String:, and
+ * -replaceCharactersInRange:withString: builds a string and calls -setString:. */
+static void cf_imp_mutable_string_set(id self, SEL _cmd, id string)
+{
+	(void)_cmd;
+	CFStringReplace((CFMutableStringRef)self,
+			CFRangeMake(0, CFStringGetLength((CFStringRef)self)), (CFStringRef)string);
+}
+
+static void cf_imp_mutable_string_append_utf8(id self, SEL _cmd, const char *utf8)
+{
+	CFStringRef built;
+
+	(void)_cmd;
+	if (utf8 == NULL || *utf8 == '\0') {
+		return;
+	}
+	built = CFStringCreateWithCString(NULL, utf8, kCFStringEncodingUTF8);
+	if (built != NULL) {
+		CFStringAppend((CFMutableStringRef)self, built);
+		CFRelease(built);
+	}
+}
+
+static id cf_imp_mutable_string_init_with_capacity(id self, SEL _cmd, unsigned long capacity)
+{
+	(void)_cmd; (void)capacity;
+	return self;
+}
+
+static const cf_own_method cf_mutable_string_methods[] = {
+	{ "length", (IMP)cf_imp_string_length, "Q@:" },
+	{ "characterAtIndex:", (IMP)cf_imp_string_char_at, "S@:Q" },
+	{ "UTF8String", (IMP)cf_imp_string_utf8, "r*@:" },
+	{ "setString:", (IMP)cf_imp_mutable_string_set, "v@:@" },
+	{ "appendUTF8String:", (IMP)cf_imp_mutable_string_append_utf8, "v@:*" },
+	{ "init", (IMP)cf_imp_mutable_string_init_with_capacity, "@@:" },
+	{ "initWithCapacity:", (IMP)cf_imp_mutable_string_init_with_capacity, "@@:Q" },
+	{ NULL, NULL, NULL },
+};
+
 static const cf_own_method cf_date_methods[] = {
 	{ "timeIntervalSinceReferenceDate", (IMP)cf_imp_date_absolute_time, "d@:" },
 	{ "timeIntervalSinceDate:", (IMP)cf_imp_date_since, "d@:@" },
@@ -1970,6 +2019,7 @@ static const struct {
 	{ _kCFRuntimeIDCFArray, "__NSCFMutableArray", "NSMutableArray", cf_mutable_array_methods },
 	{ _kCFRuntimeIDCFDictionary, "__NSCFMutableDictionary", "NSMutableDictionary", cf_mutable_dictionary_methods },
 	{ _kCFRuntimeIDCFSet, "__NSCFMutableSet", "NSMutableSet", cf_mutable_set_methods },
+	{ _kCFRuntimeIDCFString, "__NSCFMutableString", "NSMutableString", cf_mutable_string_methods },
 	{ 0, NULL, NULL, NULL },
 };
 
