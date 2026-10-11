@@ -1379,6 +1379,25 @@ Boolean _CFCalendarGetComponentDifferenceV(CFCalendarRef calendar, CFAbsoluteTim
     return false;
 }
 
+/* THE THREE DOORS BELOW ARE THE SWIFT BRIDGE'S IN ORIGIN AND ARE IMPLEMENTED FOR FOUNDATION CALENDARS.
+ * Recorded here because the dispatch reads like an ordinary toll-free bridge and its history is not obvious.
+ *
+ * WHAT UPSTREAM DOES: the only implementer of _composeAbsoluteTime:atp::, _decomposeAbsoluteTime:at:: and
+ * _addComponents:atp:options:: is Swift's NSObject bridge -- which is what the call sites' own comment says
+ * ("Note: We do not toll-free bridge for Swift"), and the __CFSwiftBridge mechanism this build turns off.
+ *
+ * WHAT THIS BUILD DOES INSTEAD: libagora-base answers all three for its own calendars (NSCFBridging.m),
+ * because the object is Foundation's and the fallback below is NOT a fallback for it -- that C path reads
+ * the calendar as a `struct __CFCalendar` and calls _CFCalendar*ComponentsV, which is right for a Core
+ * Foundation calendar and wrong for a Foundation one. Foundation has no such storage.
+ *
+ * MEASURED, before and after: a Foundation NSCalendar used to raise
+ * '-[NSCalendar _composeAbsoluteTime:::] is not implemented' at any of the three, and now decomposes the
+ * reference instant as 2001-01-01 00:00:00 UTC, composes 1970-01-01 as -978307200.0, and adds a month to
+ * the 31st of January as 2001-02-28 (the clamp, which is ICU's answer and not a roll-over). The suite case
+ * "Core Foundation asks a Foundation calendar to compute" holds those numbers. The argument shapes are Core
+ * Foundation's own C varargs protocol and not Swift syntax -- a component-description string plus the values
+ * that go with it -- which is why reproducing them in Objective-C is faithful rather than another bridge. */
 Boolean CFCalendarComposeAbsoluteTime(CFCalendarRef calendar, /* out */ CFAbsoluteTime *atp, const char *componentDesc, ...) {
     va_list args;
     va_start(args, componentDesc);

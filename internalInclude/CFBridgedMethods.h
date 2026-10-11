@@ -93,6 +93,51 @@ typedef struct __CFString *CFMutableStringRef;
 - (CFStreamError)_cfStreamError;
 @end
 
+/* --------------------------------------------------------------------------------------------------- */
+/* THE SEVEN 'incorrect signature' REPORTS, AUDITED: EVERY ONE DIFFERS IN A POINTER AND NOTHING ELSE     */
+/* --------------------------------------------------------------------------------------------------- */
+/* libobjc2 compares the METHOD it finds with the SELECTOR's registered type. Seven selectors in this
+ * bridge are reported, and the full type strings, measured on both sides, differ ONLY in a pointer --
+ * not in width, not in integer type, not in struct layout:
+ *
+ *   -getBytes:maxLength:usedLength:encoding:options:range:remainingRange:
+ *   (NSCFConstantString, NSConstantString, NSMutableString, NSOwnedString)
+ *         method   C80@0:8 ^v 16 Q24 ^Q32 Q40 Q48 {_NSRange=QQ}56 ^{_NSRange=QQ}72
+ *         selector C80@0:8 *  16 Q24 ^Q32 Q40 Q48 {_NSRange=QQ}56 ^{_NSRange=QQ}72
+ *
+ *   -_createSubstringWithRange: (NSCFConstantString, NSConstantString, NSTinyString)
+ *         method   ^{__CFString=}32@0:8{_NSRange=QQ}16
+ *         selector ^{__CFString={__CFRuntimeBase=QAQ}(?={__inline1=q}...)}32@0:8{_NSRange=QQ}16
+ *
+ *   -_cfurl (NSURL)
+ *         method   ^{__CFURL=}16@0:8
+ *         selector ^{__CFURL={__CFRuntimeBase=QAQ}IIA^{__CFString}^{__CFURL}^{_CFURLAdditionalData}A^v[1{?=qq}]}16@0:8
+ *
+ * THE FIRST FAMILY'S REAL HAZARD WAS NOT A POINTER, AND IT IS FIXED: that selector used to be reported
+ * as ...i40i44... against Core Foundation's ...Q40Q48... -- an ARGUMENT LIST passing 4 bytes where the
+ * callee reads 8. libagora-base's NSString.h records it (22 complaints from the one selector) and the
+ * cure was to make NSStringEncoding and the options type NSUInteger, which is Apple's arrangement.
+ * Both sides now read Q40 Q48, and that is why the only remaining difference is ^v against *.
+ *
+ * THE TWO RETURN-VALUE FAMILIES ARE HARMLESS BY A RULE THAT LIBAGORA-BASE ALREADY STATES OUT LOUD: "an
+ * argument list is not restricted to pointers the way a return value is" (NSCFConstantString.m). An
+ * Objective-C object pointer is one register whichever way the pointee struct is spelled, so
+ * ^{__CFString=} and the complete form ARE the same ABI, and likewise ^{__CFURL=}; the argument that
+ * carries NSRange is declared identically on both sides. MEASURED: a direct -_createSubstringWithRange:
+ * on a CFSTR answers the right substring, and every CFURL-on-NSURL door (CFURLCopyPath,
+ * CFURLHasDirectoryPath, CFURLCanBeDecomposed, CFURLCopyNetLocation, ...) passes.
+ *
+ * THE SPELLING HERE IS CORE FOUNDATION'S AND NOT FOUNDATION'S, WHICH IS DELIBERATE: this names the
+ * contract Core Foundation relies on, while libagora-base's declarations are APPLE'S SHAPES (void *,
+ * NSStringEncoding, NSUInteger) and are not to be bent to a private contract. Making the two agree
+ * therefore means changing the spelling ON THIS SIDE, which owns the selector's registered type -- and
+ * the selector currently reports char * where this protocol says uint8_t *, so THREE spellings are in
+ * play for that one selector, not two.
+ *
+ * NOT MEASURED, AND RECORDED AS SUCH: whether libobjc2 INSTALLS A TRAMPOLINE for a pointer-only
+ * difference. Nothing observed needs one -- the byte conversions, the substrings and the URL doors are
+ * all correct -- but that is an inference from the type strings, not an instrumented result. */
+
 #endif /* __OBJC__ */
 
 #endif /* COREFOUNDATION_CFBRIDGEDMETHODS_H */
