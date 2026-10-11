@@ -1727,9 +1727,12 @@ static void constructBuffers(CFAllocatorRef alloc, CFStringRef string, UInt8 *in
 
     length = CFStringGetLength(string);
     rg = CFRangeMake(0, length);
+    neededLength = 0;
     CFStringGetBytes(string, rg, kCFStringEncodingISOLatin1, 0, false, NULL, INT_MAX, &neededLength);
-    if (neededLength == length) {
+    if (neededLength == length && length > 0) {
         char *buf;
+        CFIndex converted;
+
         if ( (inBuffer != NULL) && (length <= inBufferSize) ) {
             buf = (char *)inBuffer;
             *freeCharacters = false;
@@ -1738,10 +1741,21 @@ static void constructBuffers(CFAllocatorRef alloc, CFStringRef string, UInt8 *in
             buf = (char *)malloc(length);
             *freeCharacters = true;
         }
-        CFStringGetBytes(string, rg, kCFStringEncodingISOLatin1, 0, false, (uint8_t *)buf, length, NULL);
-        *cstring = buf;
-        *useCString = true;
-    } else {
+        /* THE FILL IS CHECKED AND THE ANSWER DECIDES, NOT THE LENGTH QUERY -- see the note after this function
+         * for the measurement: for a bridged Foundation string this call answers 0 and writes nothing, and the
+         * parser used to be handed the unwritten buffer either way. A conversion that does not convert
+         * everything retries as CHARACTERS below. */
+        converted = CFStringGetBytes(string, rg, kCFStringEncodingISOLatin1, 0, false, (uint8_t *)buf, length, NULL);
+        if (converted == length) {
+            *cstring = buf;
+            *useCString = true;
+            return;
+        }
+        if (*freeCharacters) {
+            free(buf);	/* not used after all: the UniChar branch allocates its own */
+        }
+    }
+    {
         UniChar *buf;
         if ( (inBuffer != NULL) && ((length * sizeof(UniChar)) <= inBufferSize) ) {
             buf = (UniChar *)inBuffer;
@@ -1756,6 +1770,27 @@ static void constructBuffers(CFAllocatorRef alloc, CFStringRef string, UInt8 *in
         *useCString = false;
     }
 }
+
+/* THE ISOLATIN1 CONVERSION IS TRIED ABOVE ONLY WHEN IT ACTUALLY CONVERTED, AND THAT CONDITION IS THE FIX FOR
+ * A GARBLED PARSE RATHER THAN A DETAIL. Both CFStringGetBytes calls above used to be unchecked, and for a
+ * BRIDGED Foundation string the encoding they are handed is Core Foundation's (kCFStringEncodingISOLatin1 is
+ * 0x201) while the Objective-C method that answers -- Cocoa's
+ * -getBytes:maxLength:usedLength:encoding:options:range:remainingRange: -- takes an NSStringEncoding (5 for the
+ * same thing). The conversion therefore FAILS and answers 0, the length query's out-parameter is left
+ * UNWRITTEN so the `neededLength == length` test reads whatever the stack held, and when that happened to pass
+ * the parser was handed a buffer that no one had written and parsed TWENTY BYTES OF STACK as a URL. Measured:
+ * CFURLCreateWithString on a CFSTR lost its host, and on some runs aborted, while the same text as a native
+ * CFString parsed correctly -- the nondeterminism is exactly what uninitialised memory looks like.
+ *
+ * SO EACH CALL IS CHECKED AND A FAILURE FALLS THROUGH to the UniChar branch below, which asks for characters
+ * rather than bytes and DOES work for a bridged string (CFStringGetCharacters answers the right twenty).
+ * The deeper defect was Core Foundation's dispatch handing a CFStringEncoding to a method that wants an
+ * NSStringEncoding, so this fallback was the only thing standing between a bridged string and a parse of
+ * stack memory. THAT DEFECT IS NOW FIXED AT THE DOOR IT ARRIVES AT -- libagora-base/NSString.m, where
+ * -getBytes:maxLength:usedLength:encoding:options:range:remainingRange: re-asks a conversion that produced
+ * nothing in Core Foundation's numbering, which is why CFURLCreateWithString on a CFSTR keeps its host. THE
+ * CHECKS HERE STAY: an encoding nobody can convert is still not a reason to hand the parser an unwritten
+ * buffer, and this is the function that would do it. */
 
 static void _parseComponentsCString(CFAllocatorRef alloc, CFURLRef baseURL, CFIndex cfStringLength, const char *characterArray, UInt32 *theFlags, CFRange *packedRanges, uint8_t *numberOfRanges)
 #define CFURL_INCLUDE_PARSE_COMPONENTS

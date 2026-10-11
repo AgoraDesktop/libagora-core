@@ -757,10 +757,26 @@ static CFTimeZoneRef __CFTimeZoneCreateSystem(void) {
     ret = readlink(TZDEFAULT, linkbuf, sizeof(linkbuf));
     // The link can be relative, we treat this the same as if there was no link
     if (__tzZoneInfo && (0 < ret) && (linkbuf[0] != '.')) {
+        char zoneInfoDir[CFMaxPathSize];
+        const char *tzZoneInfo;
+        size_t zoneInfoDirLen;
+
         linkbuf[ret] = '\0';
-        const char *tzZoneInfo = CFStringGetCStringPtr(__tzZoneInfo, kCFStringEncodingASCII);
-        size_t zoneInfoDirLen = CFStringGetLength(__tzZoneInfo);
-        if (strncmp(linkbuf, tzZoneInfo, zoneInfoDirLen) == 0) {
+        /* THE FAST POINTER CAN BE NULL, AND strncmp THROUGH IT IS THE SIGSEGV THIS FUNCTION USED TO TAKE --
+         * MEASURED: __tzZoneInfo is CFSTR(TZDIR), a BRIDGED Foundation string, and libagora-base's
+         * -_fastCStringContents: answers NULL by design ("no internal 8-bit buffer: Core Foundation should copy
+         * instead"), so CFStringGetCStringPtr answers NULL on a host that HAS /etc/localtime -- which is every
+         * host, and which is why CFTimeZoneCopySystem died inside libc for CFCalendarCreateWithIdentifier's
+         * sake and left a whole type unconstructible. NULL is answered by CONVERTING into a local buffer, and a
+         * conversion that fails as well skips this branch rather than reading through a null pointer. */
+        tzZoneInfo = CFStringGetCStringPtr(__tzZoneInfo, kCFStringEncodingASCII);
+        if (tzZoneInfo == NULL) {
+            if (CFStringGetCString(__tzZoneInfo, zoneInfoDir, (CFIndex)sizeof zoneInfoDir, kCFStringEncodingASCII)) {
+                tzZoneInfo = zoneInfoDir;
+            }
+        }
+        zoneInfoDirLen = CFStringGetLength(__tzZoneInfo);
+        if (tzZoneInfo != NULL && strncmp(linkbuf, tzZoneInfo, zoneInfoDirLen) == 0) {
             name = CFStringCreateWithBytes(kCFAllocatorSystemDefault, (uint8_t *)linkbuf + zoneInfoDirLen,
                                            strlen(linkbuf) - zoneInfoDirLen, kCFStringEncodingUTF8, false);
         } else {
@@ -776,9 +792,14 @@ static CFTimeZoneRef __CFTimeZoneCreateSystem(void) {
         #endif
         time_t t = time(NULL);
         struct tm lt = {0};
-        localtime_r(&t, &lt);
-        
-        name = CFStringCreateWithCString(kCFAllocatorSystemDefault, lt.tm_zone, kCFStringEncodingUTF8);
+
+        /* ONE GUARD, AND IT IS NOT THE ONE THE BACKTRACE FIRST SUGGESTED: localtime_r DOES fill tm_zone here
+         * ("EDT"), which is worth writing down because the crash in this function is one branch ABOVE and a
+         * wrong diagnosis cost a build. The guard stays because tm_zone is not promised by the standard (a
+         * system with no abbreviation to report leaves it empty or NULL) and the string is built through it. */
+        if (localtime_r(&t, &lt) != NULL && lt.tm_zone != NULL && lt.tm_zone[0] != '\0') {
+            name = CFStringCreateWithCString(kCFAllocatorSystemDefault, lt.tm_zone, kCFStringEncodingUTF8);
+        }
     }
 #endif
     if (name) {
