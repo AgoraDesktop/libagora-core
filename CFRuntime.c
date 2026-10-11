@@ -384,7 +384,30 @@ static size_t __CFRuntimeOwnedClassCount;
 #endif
 
 CF_PRIVATE Boolean _CFIsAnObject(const void *obj) {
-    return obj != NULL && object_getClass((void *)obj) != NULL;
+    Class cls;
+
+    /* AND THE CLASS HAS TO BE ONE THE RUNTIME KNOWS, WHICH IS THE HALF THAT WAS MISSING. `object_getClass`
+     * answers a POINTER for anything with an isa, including a bare CFSTR: clang gives every constant string
+     * the placeholder storage declared above as its isa, and that storage is zeroed, so the pointer is not a
+     * class there is anything to send to. MEASURED, WITH NO FOUNDATION LOADED AT ALL:
+     *
+     *   object_getClass(CFSTR("kCGColorSpaceSRGB"))          -> non-NULL  (which is why this test passed)
+     *   class_getName(object_getClass(CFSTR("...")))         -> NULL      (a class without a name)
+     *   CFEqual(CFSTR("kCGColorSpaceSRGB"), CFSTR("kCGColorSpaceAdobeRGB1998"))
+     *     -> objc_msgSend_fpret <- CFEqual, rsi = "isEqual:", rdi = the constant, SIGSEGV
+     *
+     * WHAT IT COST: that is the first comparison of two DISTINCT Core Foundation constants in
+     * libagora-drawing, which is how CGColorSpaceCreateWithName came to segfault on kCGColorSpaceAdobeRGB1998
+     * while kCGColorSpaceSRGB worked -- `CFEqual` returns early when the two pointers are IDENTICAL, so the
+     * single-name case never reached a dispatch at all.
+     *
+     * A BRIDGED FOUNDATION OBJECT IS UNAFFECTED: its class is one the runtime registered and it has a name,
+     * so it is an object by this test and the doors hand it to Objective-C exactly as before. */
+    if (obj == NULL) {
+        return false;
+    }
+    cls = object_getClass((void *)obj);
+    return cls != NULL && class_getName(cls) != NULL;
 }
 
 /* AGORA: IS THIS OBJECT ONE CORE FOUNDATION MADE, RATHER THAN ONE FOUNDATION DID? Both are objects, and
