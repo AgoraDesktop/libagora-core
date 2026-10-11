@@ -1612,8 +1612,21 @@ static id cf_imp_attributed_attributes(id self, SEL _cmd, unsigned long location
 	return (id)attributes;
 }
 
+/* AND -length, WHICH IS THE DOOR THIS BRIDGE'S OWN READS GO THROUGH AND WHICH WAS MISSING FROM BOTH ROWS.
+ * MEASURED: Foundation's -mutableString proxy reads its owner with [_owner length] and [_owner string], both
+ * PUBLIC doors -- so the fix belongs here and not in the proxy, whose writes already worked. Without this,
+ * [_owner length] on a Core Foundation-backed attributed string ran FOUNDATION's implementation over
+ * FOUNDATION's storage and answered 0, which made the proxy describe itself as EMPTY, made -appendString:
+ * through it a no-op, and yet left -replaceCharactersInRange:withString: working. Reads wrong, writes partly. */
+static unsigned long cf_imp_attributed_length(id self, SEL _cmd)
+{
+	(void)_cmd;
+	return (unsigned long)CFAttributedStringGetLength((CFAttributedStringRef)self);
+}
+
 static const cf_own_method cf_attributed_string_methods[] = {
 	{ "string", (IMP)cf_imp_attributed_string, "@@:" },
+	{ "length", (IMP)cf_imp_attributed_length, "Q@:" },
 	{ "attributesAtIndex:effectiveRange:", (IMP)cf_imp_attributed_attributes, "@@:Q^{_NSRange=QQ}" },
 	{ NULL, NULL, NULL },
 };
@@ -1651,167 +1664,18 @@ static const cf_own_method cf_attributed_string_methods[] = {
  *      Reads wrong, writes partly -- which is worse than refusing, and is why the suite case drives neither
  *      and says so.
  *
- * SO THE HONEST STATUS IS NOT "cannot be bridged" BUT "bridged badly by inheritance, and the two ways out
- * are to teach Foundation's bridge to read a Core Foundation owner through the public API -- its reads are
- * what fail -- or to stop answering it. Left as it stands, recorded as measured.
- */static CFAttributedStringRef cf_attributed_from_foundation(id other)
-{
-	CFMutableAttributedStringRef built;
-	NSUInteger length, index;
-
-	if (other == nil) {
-		return NULL;
-	}
-	built = CFAttributedStringCreateMutable(NULL, 0);
-	if (built == NULL) {
-		return NULL;
-	}
-	CFAttributedStringReplaceString(built, CFRangeMake(0, 0), (CFStringRef)[other string]);
-	length = (NSUInteger)[other length];
-	index = 0;
-	while (index < length) {
-		NSRange effective = NSMakeRange(0, 0);
-		NSDictionary *attrs = (NSDictionary *)[other attributesAtIndex:index effectiveRange:&effective];
-
-		if (effective.length == 0) {
-			break;
-		}
-		if (attrs != nil) {
-			CFAttributedStringSetAttributes(built, CFRangeMake((CFIndex)index, (CFIndex)effective.length),
-							(CFDictionaryRef)attrs, true);
-		}
-		index += effective.length;
-	}
-	return (CFAttributedStringRef)built;
-}
-
-static void cf_imp_mutable_attributed_set_string(id self, SEL _cmd, NSRange range, id str)
-{
-	(void)_cmd;
-	CFAttributedStringReplaceString((CFMutableAttributedStringRef)self,
-					CFRangeMake((CFIndex)range.location, (CFIndex)range.length), (CFStringRef)str);
-}
-
-static void cf_imp_mutable_attributed_replace_attributed(id self, SEL _cmd, NSRange range, id other)
-{
-	CFAttributedStringRef converted;
-
-	(void)_cmd;
-	converted = cf_attributed_from_foundation(other);
-	if (converted != NULL) {
-		CFAttributedStringReplaceAttributedString((CFMutableAttributedStringRef)self,
-							  CFRangeMake((CFIndex)range.location, (CFIndex)range.length), converted);
-		CFRelease(converted);
-	}
-}
-
-static void cf_imp_mutable_attributed_insert(id self, SEL _cmd, id other, unsigned long loc)
-{
-	cf_imp_mutable_attributed_replace_attributed(self, _cmd, NSMakeRange((NSUInteger)loc, 0), other);
-}
-
-static void cf_imp_mutable_attributed_append(id self, SEL _cmd, id other)
-{
-	CFIndex length = CFAttributedStringGetLength((CFAttributedStringRef)self);
-
-	cf_imp_mutable_attributed_replace_attributed(self, _cmd, NSMakeRange((NSUInteger)length, 0), other);
-}
-
-static void cf_imp_mutable_attributed_delete(id self, SEL _cmd, NSRange range)
-{
-	(void)_cmd;
-	CFAttributedStringReplaceString((CFMutableAttributedStringRef)self,
-					CFRangeMake((CFIndex)range.location, (CFIndex)range.length), CFSTR(""));
-}
-
-static void cf_imp_mutable_attributed_set_attributed(id self, SEL _cmd, id other)
-{
-	CFIndex length = CFAttributedStringGetLength((CFAttributedStringRef)self);
-
-	cf_imp_mutable_attributed_replace_attributed(self, _cmd, NSMakeRange(0, (NSUInteger)length), other);
-}
-
-static void cf_imp_mutable_attributed_add_attribute(id self, SEL _cmd, id name, id value, NSRange range)
-{
-	(void)_cmd;
-	CFAttributedStringSetAttribute((CFMutableAttributedStringRef)self,
-				       CFRangeMake((CFIndex)range.location, (CFIndex)range.length),
-				       (CFStringRef)name, (CFTypeRef)value);
-}
-
-static void cf_imp_mutable_attributed_add_attributes(id self, SEL _cmd, id attrs, NSRange range)
-{
-	(void)_cmd;
-	CFAttributedStringSetAttributes((CFMutableAttributedStringRef)self,
-					CFRangeMake((CFIndex)range.location, (CFIndex)range.length),
-					(CFDictionaryRef)attrs, false);
-}
-
-static void cf_imp_mutable_attributed_set_attributes(id self, SEL _cmd, id attrs, NSRange range)
-{
-	(void)_cmd;
-	CFAttributedStringSetAttributes((CFMutableAttributedStringRef)self,
-					CFRangeMake((CFIndex)range.location, (CFIndex)range.length),
-					(CFDictionaryRef)attrs, true);
-}
-
-static void cf_imp_mutable_attributed_remove_attribute(id self, SEL _cmd, id name, NSRange range)
-{
-	(void)_cmd;
-	CFAttributedStringRemoveAttribute((CFMutableAttributedStringRef)self,
-					  CFRangeMake((CFIndex)range.location, (CFIndex)range.length), (CFStringRef)name);
-}
-
-static void cf_imp_mutable_attributed_begin_editing(id self, SEL _cmd)
-{
-	(void)_cmd;
-	CFAttributedStringBeginEditing((CFMutableAttributedStringRef)self);
-}
-
-static void cf_imp_mutable_attributed_end_editing(id self, SEL _cmd)
-{
-	(void)_cmd;
-	CFAttributedStringEndEditing((CFMutableAttributedStringRef)self);
-}
-
-static id cf_imp_mutable_attributed_init(id self, SEL _cmd)
-{
-	(void)_cmd;
-	return self;
-}
-
-static const cf_own_method cf_mutable_attributed_string_methods[] = {
-	{ "string", (IMP)cf_imp_attributed_string, "@@:" },
-	{ "attributesAtIndex:effectiveRange:", (IMP)cf_imp_attributed_attributes, "@@:Q^{_NSRange=QQ}" },
-	{ "replaceCharactersInRange:withString:", (IMP)cf_imp_mutable_attributed_set_string, "v@:{_NSRange=QQ}@" },
-	{ "replaceCharactersInRange:withAttributedString:", (IMP)cf_imp_mutable_attributed_replace_attributed, "v@:{_NSRange=QQ}@" },
-	{ "insertAttributedString:atIndex:", (IMP)cf_imp_mutable_attributed_insert, "v@:@@Q" },
-	{ "appendAttributedString:", (IMP)cf_imp_mutable_attributed_append, "v@:@" },
-	{ "deleteCharactersInRange:", (IMP)cf_imp_mutable_attributed_delete, "v@:{_NSRange=QQ}" },
-	{ "setAttributedString:", (IMP)cf_imp_mutable_attributed_set_attributed, "v@:@" },
-	{ "addAttribute:value:range:", (IMP)cf_imp_mutable_attributed_add_attribute, "v@:@@{_NSRange=QQ}" },
-	{ "addAttributes:range:", (IMP)cf_imp_mutable_attributed_add_attributes, "v@:@{_NSRange=QQ}" },
-	{ "setAttributes:range:", (IMP)cf_imp_mutable_attributed_set_attributes, "v@:@{_NSRange=QQ}" },
-	{ "removeAttribute:range:", (IMP)cf_imp_mutable_attributed_remove_attribute, "v@:@{_NSRange=QQ}" },
-	{ "beginEditing", (IMP)cf_imp_mutable_attributed_begin_editing, "v@:" },
-	{ "endEditing", (IMP)cf_imp_mutable_attributed_end_editing, "v@:" },
-	{ "init", (IMP)cf_imp_mutable_attributed_init, "@@:" },
-	{ NULL, NULL, NULL },
-};
-
-/* NSCharacterSet PRIMITIVES, AND THERE ARE SIX -- membership, the plane question, and the three doors that
- * answer with a WHOLE SET (the bitmap, the inverse, the mutable copy). Two of the six are the pair Core
- * Foundation asks for by name (longCharacterIsMember:, hasMemberInPlane:); the other four are what
- * libagora-base's own doors are written over: -characterIsMember: (the unichar form), -bitmapRepresentation,
- * -invertedSet and -mutableCopy. -description and -encodeWithCoder: are NOT here, and that is deliberate:
- * they read the ranges back out of -bitmapRepresentation, which is the one shape both sides can produce --
- * see fn_ranges_from_bitmap in NSCharacterSet.m.
+ * SO THE HONEST STATUS IS NOT "cannot be bridged" -- IT IS FIXED, AND THE FIX WAS ON BOTH SIDES. Foundation's
+ * proxy (FNAttributedStringBridge) reads its owner with [_owner length] and [_owner string], which are PUBLIC
+ * doors, so -length had to be answered here -- it was missing from BOTH attributed rows, which is what made
+ * the proxy read 0 and describe itself as empty. And the proxy had to answer the three doors its own
+ * superclass actually uses (-UTF8String, -setString:, -appendUTF8String:) rather than only the Cocoa
+ * primitives, because this library's mutable string keeps its storage behind those and a subclass that
+ * answers only the Cocoa names gets ITS OWN storage used instead.
  *
- * THE BITMAP FORMAT IS CORE FOUNDATION'S, WHICH WAS A DECISION RATHER THAN A DETAIL: this library used to
- * emit an annotated form (magic word, range count, then the bits) and now emits the bare 8192-byte plane-0
- * bitmap. base still ACCEPTS the old form on the way in, so nothing stored breaks, and the round trip no
- * longer depends on which side produced the bytes. */
-static char cf_imp_charset_character_member(id self, SEL _cmd, unsigned short character)
+ * MEASURED AFTER BOTH FIXES: the view describes "hello", -appendString: on it reaches the attributed string
+ * (CF length 5 -> 6), -replaceCharactersInRange: still does, and the two agree afterwards. A Core Foundation
+ * attributed string now hands out a working mutable-string view through Foundation's door.
+ */static char cf_imp_charset_character_member(id self, SEL _cmd, unsigned short character)
 {
 	(void)_cmd;
 	return (char)(CFCharacterSetIsCharacterMember((CFCharacterSetRef)self, (UniChar)character) ? 1 : 0);
