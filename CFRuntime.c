@@ -1735,8 +1735,24 @@ static const cf_own_method cf_calendar_methods[] = {
  * every type a class of Core Foundation's own is what turned that into a raise.
  *
  * APPLE HAS __NSCFArray AND __NSCFMutableArray AND PICKS AT CREATION, which is what the category parameter
- * of _CFRuntimeCreateInstance exists for and what CFArray.c passes NULL for. That is a Core Foundation
- * change, not a table entry, and until it is made the mutable half of these types is not bridged. */
+ * of _CFRuntimeCreateInstance exists for (measured: the parameter is there, it is used only for OASafe
+ * allocation naming, and CFArray.c passes NULL at both creation sites). AND THE FOUNDATION SIDE COMES
+ * FIRST, WHICH IS NOT WHERE THIS LOOKS LIKE IT LEADS. A mutable owned class cannot be given Core
+ * Foundation-reading primitives until Foundation's mutable class READS THROUGH PRIMITIVES, and the two have
+ * to land together -- measured, because landing the class alone would be worse than the raise it replaces:
+ *
+ *   - AGArrayMutable (libagora-base/NSArray.m) implements NOTHING. Its own comment says why: "NSMutableArray's
+ *     own implementation IS the mutable storage implementation, this class inherits it". So a subclass of
+ *     NSMutableArray inherits code that reads _items/_count -- Foundation's storage -- and that code over a
+ *     Core Foundation object is the SILENT CORRUPTION the CFArray commit warned about, which is exactly what
+ *     giving every type its own class had turned into a loud raise.
+ *   - NSMutableArray's implementation is 434 lines and 32 methods with 23 direct _items touches. Those are
+ *     the sites that have to become calls to a small primitive set, the way NSArray's were routed to -count
+ *     and -objectAtIndex: (the two primitives cf_array_methods implements below).
+ *
+ * SO THE ORDER IS: route Foundation's mutable array through primitives, then add the row and the category in
+ * Core Foundation, then the same for the other six mutable types. Until the first step is done the mutable
+ * half of these types is not bridged, and the loud raise is the honest ceiling. */
 static const struct {
 	CFTypeID type;
 	const char *name;
