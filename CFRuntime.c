@@ -1784,6 +1784,25 @@ static const struct {
 #if defined(__OBJC__)
 extern SEL sel_registerName(const char *name);
 
+/* ---------------------------------------------------------------------------------------------------- */
+/* THE METHOD TYPES A ROW GIVES MUST BE THE FULL ENCODING FOR ANY SELECTOR WITH TWO ARGUMENTS OR MORE    */
+/* ---------------------------------------------------------------------------------------------------- */
+/* MEASURED, and it cost an afternoon: an owned class built by HAND with the ABBREVIATED encoding --
+ * "v@:@@Q" for -insertObject:atIndex: -- receives NO SEND for that selector at all. The class is built,
+ * class_getInstanceMethod resolves to the row's IMP, calling that IMP directly works, and the message
+ * simply goes to Foundation's implementation instead. With the encoding method_getTypeEncoding returns for
+ * FOUNDATION'S OWN method of the same selector -- "v32@0:8@16Q24" -- the send arrives as it should.
+ *
+ * THE DIFFERENCE IS THE FRAME: the abbreviated form has no offsets, and libobjc2 needs them to marshal two
+ * arguments. Zero- and one-argument selectors ("Q@:" for -count, "v@:@" for -addObject:) behave with either
+ * spelling, which is why every immutable row in the table above has always worked and why this stayed
+ * hidden until a MUTABLE row needed a two-argument mutator.
+ *
+ * SO A ROW THAT HAS A FOUNDATION PROTOTYPE SHOULD TAKE ITS TYPES FROM THAT PROTOTYPE rather than from a
+ * hand-written string: class_getInstanceMethod(superclass, sel) and method_getTypeEncoding of the result.
+ * The immutable rows above keep their abbreviations because they are measured to work; a mutable row
+ * answers Foundation methods, so it has a prototype for every selector it needs -- and -fnMutationWord,
+ * which is Foundation's own private primitive, has one too. */
 static uintptr_t cf_bridged_subclass(CFTypeID typeID, const void *cls_ref)
 {
 	const cf_own_method *methods = NULL;
