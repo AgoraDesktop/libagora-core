@@ -272,7 +272,10 @@ CFAttributedStringRef _CFAttributedStringCreateWithRuns(CFAllocatorRef alloc, CF
 
 CFMutableAttributedStringRef CFAttributedStringCreateMutable(CFAllocatorRef alloc, CFIndex maxLength) {
     CFIndex size = sizeof(struct __CFAttributedString) - sizeof(CFRuntimeBase);
-    struct __CFAttributedString *newAttrStr = (CFMutableAttributedStringRef)_CFRuntimeCreateInstance(alloc, CFAttributedStringGetTypeID(), size, NULL);
+    /* THE CATEGORY, WHICH IS WHAT SAYS THIS INSTANCE IS THE MUTABLE HALF -- the mutable and immutable
+     * attributed strings share one type id, and this is the only creator that makes a mutable one. */
+    struct __CFAttributedString *newAttrStr = (CFMutableAttributedStringRef)_CFRuntimeCreateInstance(alloc, CFAttributedStringGetTypeID(), size,
+                                                                                                      (unsigned char *)"CFMutableAttributedString");
 
     if (newAttrStr == NULL) return NULL;
 

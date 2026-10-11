@@ -1618,6 +1618,170 @@ static const cf_own_method cf_attributed_string_methods[] = {
 	{ NULL, NULL, NULL },
 };
 
+/* ---------------------------------------------------------------------------------------------------- */
+/* THE MUTABLE HALF OF AN ATTRIBUTED STRING: A STRING PLUS A RUN ARRAY, AND ONE DOOR THAT CANNOT BE      */
+/* ---------------------------------------------------------------------------------------------------- */
+/* MEASURED, IN THE ONE PLACE IT MATTERS: libagora-base's NSMutableAttributedString keeps a NSMutableString
+ * and a run array, and its ONLY storage-writing method is -replaceCharactersInRange:withString: -- the run
+ * helper -fnShiftRunsAfter:by: has exactly one caller, the same method (found by scanning for the helper's
+ * CALLERS as well as the field names, which is the rule the character set's turn had to learn). Every other
+ * mutation is written over it or over the attribute doors, and all of them are answered here rather than
+ * left to Foundation, because Foundation's implementations write ITS storage into a Core Foundation object.
+ *
+ * A FOUNDATION ATTRIBUTED STRING ARRIVES AS AN ARGUMENT AND IS RECONSTRUCTED, NOT CAST. Unlike the
+ * character sets there is no shared wire form to convert through, so the conversion walks the IMMUTABLE
+ * primitive pair this class already answers -- -string and -attributesAtIndex:effectiveRange: -- and builds
+ * a Core Foundation attributed string run by run. Casting one is what segfaulted the character sets.
+ *
+ * -mutableString IS NOT ANSWERED AND CANNOT BE: it hands out a live mutable string view of the receiver,
+ * and Core Foundation's attributed string exposes no such view -- it keeps a CFMutableString internally but
+ * offers no way to hand it out. A caller reaching it through Foundation would read Foundation's storage, so
+ * this is recorded as the one gap rather than papered over. */
+static CFAttributedStringRef cf_attributed_from_foundation(id other)
+{
+	CFMutableAttributedStringRef built;
+	NSUInteger length, index;
+
+	if (other == nil) {
+		return NULL;
+	}
+	built = CFAttributedStringCreateMutable(NULL, 0);
+	if (built == NULL) {
+		return NULL;
+	}
+	CFAttributedStringReplaceString(built, CFRangeMake(0, 0), (CFStringRef)[other string]);
+	length = (NSUInteger)[other length];
+	index = 0;
+	while (index < length) {
+		NSRange effective = NSMakeRange(0, 0);
+		NSDictionary *attrs = (NSDictionary *)[other attributesAtIndex:index effectiveRange:&effective];
+
+		if (effective.length == 0) {
+			break;
+		}
+		if (attrs != nil) {
+			CFAttributedStringSetAttributes(built, CFRangeMake((CFIndex)index, (CFIndex)effective.length),
+							(CFDictionaryRef)attrs, true);
+		}
+		index += effective.length;
+	}
+	return (CFAttributedStringRef)built;
+}
+
+static void cf_imp_mutable_attributed_set_string(id self, SEL _cmd, NSRange range, id str)
+{
+	(void)_cmd;
+	CFAttributedStringReplaceString((CFMutableAttributedStringRef)self,
+					CFRangeMake((CFIndex)range.location, (CFIndex)range.length), (CFStringRef)str);
+}
+
+static void cf_imp_mutable_attributed_replace_attributed(id self, SEL _cmd, NSRange range, id other)
+{
+	CFAttributedStringRef converted;
+
+	(void)_cmd;
+	converted = cf_attributed_from_foundation(other);
+	if (converted != NULL) {
+		CFAttributedStringReplaceAttributedString((CFMutableAttributedStringRef)self,
+							  CFRangeMake((CFIndex)range.location, (CFIndex)range.length), converted);
+		CFRelease(converted);
+	}
+}
+
+static void cf_imp_mutable_attributed_insert(id self, SEL _cmd, id other, unsigned long loc)
+{
+	cf_imp_mutable_attributed_replace_attributed(self, _cmd, NSMakeRange((NSUInteger)loc, 0), other);
+}
+
+static void cf_imp_mutable_attributed_append(id self, SEL _cmd, id other)
+{
+	CFIndex length = CFAttributedStringGetLength((CFAttributedStringRef)self);
+
+	cf_imp_mutable_attributed_replace_attributed(self, _cmd, NSMakeRange((NSUInteger)length, 0), other);
+}
+
+static void cf_imp_mutable_attributed_delete(id self, SEL _cmd, NSRange range)
+{
+	(void)_cmd;
+	CFAttributedStringReplaceString((CFMutableAttributedStringRef)self,
+					CFRangeMake((CFIndex)range.location, (CFIndex)range.length), CFSTR(""));
+}
+
+static void cf_imp_mutable_attributed_set_attributed(id self, SEL _cmd, id other)
+{
+	CFIndex length = CFAttributedStringGetLength((CFAttributedStringRef)self);
+
+	cf_imp_mutable_attributed_replace_attributed(self, _cmd, NSMakeRange(0, (NSUInteger)length), other);
+}
+
+static void cf_imp_mutable_attributed_add_attribute(id self, SEL _cmd, id name, id value, NSRange range)
+{
+	(void)_cmd;
+	CFAttributedStringSetAttribute((CFMutableAttributedStringRef)self,
+				       CFRangeMake((CFIndex)range.location, (CFIndex)range.length),
+				       (CFStringRef)name, (CFTypeRef)value);
+}
+
+static void cf_imp_mutable_attributed_add_attributes(id self, SEL _cmd, id attrs, NSRange range)
+{
+	(void)_cmd;
+	CFAttributedStringSetAttributes((CFMutableAttributedStringRef)self,
+					CFRangeMake((CFIndex)range.location, (CFIndex)range.length),
+					(CFDictionaryRef)attrs, false);
+}
+
+static void cf_imp_mutable_attributed_set_attributes(id self, SEL _cmd, id attrs, NSRange range)
+{
+	(void)_cmd;
+	CFAttributedStringSetAttributes((CFMutableAttributedStringRef)self,
+					CFRangeMake((CFIndex)range.location, (CFIndex)range.length),
+					(CFDictionaryRef)attrs, true);
+}
+
+static void cf_imp_mutable_attributed_remove_attribute(id self, SEL _cmd, id name, NSRange range)
+{
+	(void)_cmd;
+	CFAttributedStringRemoveAttribute((CFMutableAttributedStringRef)self,
+					  CFRangeMake((CFIndex)range.location, (CFIndex)range.length), (CFStringRef)name);
+}
+
+static void cf_imp_mutable_attributed_begin_editing(id self, SEL _cmd)
+{
+	(void)_cmd;
+	CFAttributedStringBeginEditing((CFMutableAttributedStringRef)self);
+}
+
+static void cf_imp_mutable_attributed_end_editing(id self, SEL _cmd)
+{
+	(void)_cmd;
+	CFAttributedStringEndEditing((CFMutableAttributedStringRef)self);
+}
+
+static id cf_imp_mutable_attributed_init(id self, SEL _cmd)
+{
+	(void)_cmd;
+	return self;
+}
+
+static const cf_own_method cf_mutable_attributed_string_methods[] = {
+	{ "string", (IMP)cf_imp_attributed_string, "@@:" },
+	{ "attributesAtIndex:effectiveRange:", (IMP)cf_imp_attributed_attributes, "@@:Q^{_NSRange=QQ}" },
+	{ "replaceCharactersInRange:withString:", (IMP)cf_imp_mutable_attributed_set_string, "v@:{_NSRange=QQ}@" },
+	{ "replaceCharactersInRange:withAttributedString:", (IMP)cf_imp_mutable_attributed_replace_attributed, "v@:{_NSRange=QQ}@" },
+	{ "insertAttributedString:atIndex:", (IMP)cf_imp_mutable_attributed_insert, "v@:@@Q" },
+	{ "appendAttributedString:", (IMP)cf_imp_mutable_attributed_append, "v@:@" },
+	{ "deleteCharactersInRange:", (IMP)cf_imp_mutable_attributed_delete, "v@:{_NSRange=QQ}" },
+	{ "setAttributedString:", (IMP)cf_imp_mutable_attributed_set_attributed, "v@:@" },
+	{ "addAttribute:value:range:", (IMP)cf_imp_mutable_attributed_add_attribute, "v@:@@{_NSRange=QQ}" },
+	{ "addAttributes:range:", (IMP)cf_imp_mutable_attributed_add_attributes, "v@:@{_NSRange=QQ}" },
+	{ "setAttributes:range:", (IMP)cf_imp_mutable_attributed_set_attributes, "v@:@{_NSRange=QQ}" },
+	{ "removeAttribute:range:", (IMP)cf_imp_mutable_attributed_remove_attribute, "v@:@{_NSRange=QQ}" },
+	{ "beginEditing", (IMP)cf_imp_mutable_attributed_begin_editing, "v@:" },
+	{ "endEditing", (IMP)cf_imp_mutable_attributed_end_editing, "v@:" },
+	{ "init", (IMP)cf_imp_mutable_attributed_init, "@@:" },
+	{ NULL, NULL, NULL },
+};
+
 /* NSCharacterSet PRIMITIVES, AND THERE ARE SIX -- membership, the plane question, and the three doors that
  * answer with a WHOLE SET (the bitmap, the inverse, the mutable copy). Two of the six are the pair Core
  * Foundation asks for by name (longCharacterIsMember:, hasMemberInPlane:); the other four are what
@@ -2239,6 +2403,7 @@ static const struct {
 	{ _kCFRuntimeIDCFString, "__NSCFMutableString", "NSMutableString", cf_mutable_string_methods },
 	{ _kCFRuntimeIDCFData, "__NSCFMutableData", "NSMutableData", cf_mutable_data_methods },
 	{ _kCFRuntimeIDCFCharacterSet, "__NSCFMutableCharacterSet", "NSMutableCharacterSet", cf_mutable_charset_methods },
+	{ _kCFRuntimeIDCFAttributedString, "__NSCFMutableAttributedString", "NSMutableAttributedString", cf_mutable_attributed_string_methods },
 	{ 0, NULL, NULL, NULL },
 };
 
