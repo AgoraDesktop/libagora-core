@@ -1673,6 +1673,29 @@ static const cf_own_method cf_calendar_methods[] = {
 	{ NULL, NULL, NULL },
 };
 
+/* THE MUTABLE SIBLINGS CANNOT BE COVERED FROM THIS TABLE, AND THEIR FAILURE IS LOUD RATHER THAN QUIET --
+ * WHICH IS A MEASUREMENT AND NOT A HOPE. CFMutableArrayRef and CFArrayRef SHARE ONE TYPE ID (the same is
+ * true of the mutable set, dictionary, string, data and attributed string), so the class built here cannot
+ * tell them apart, and a row answers for both. What a caller gets today, measured on the objects this
+ * table builds:
+ *
+ *     [(NSMutableArray *)CFArrayCreateMutable(...) addObject:@"c"]
+ *         -> NSInvalidArgumentException: -[__NSCFArray addObject:] is not implemented
+ *     [(NSMutableCharacterSet *)CFCharacterSetCreateMutable(NULL) addCharactersInString:@"z"]
+ *         -> NSInvalidArgumentException: -[__NSCFCharacterSet addCharactersInString:] is not implemented
+ *
+ * AND CORE FOUNDATION'S OWN DOORS ON THE SAME OBJECT KEEP WORKING (measured: characterIsMember: answers
+ * 'q' after CFCharacterSetAddCharactersInString), so nothing is corrupted -- the mutation simply is not
+ * answered by Foundation. The other mutable types are the same shape and are NOT measured one by one.
+ *
+ * AN EARLIER COMMIT DESCRIBED A WORSE STATE AND THIS IS WHY THE DESCRIPTION CHANGED: while Core
+ * Foundation's objects still wore FOUNDATION's class, a CFMutableArrayRef would have answered -addObject:
+ * with an inherited NSMutableArray method reading Core Foundation storage -- a silent corruption. Giving
+ * every type a class of Core Foundation's own is what turned that into a raise.
+ *
+ * APPLE HAS __NSCFArray AND __NSCFMutableArray AND PICKS AT CREATION, which is what the category parameter
+ * of _CFRuntimeCreateInstance exists for and what CFArray.c passes NULL for. That is a Core Foundation
+ * change, not a table entry, and until it is made the mutable half of these types is not bridged. */
 static const struct {
 	CFTypeID type;
 	const char *name;
