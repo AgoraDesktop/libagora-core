@@ -50,6 +50,14 @@ struct __CFArray {
     void *_store;           /* can be NULL when MutableDeque */
 };
 
+/* THE ADDRESS OF THE MUTATION WORD, for the owned mutable class -- see CFInternal.h. Core Foundation bumps
+ * this field at every mutation, so a Foundation fast-enumeration loop over a Core Foundation array watches
+ * Core Foundation's own counter. */
+CF_PRIVATE unsigned long *__CFArrayGetMutationWord(CFArrayRef array)
+{
+    return (unsigned long *)&((struct __CFArray *)array)->_mutations;
+}
+
 /* Flag bits */
 enum {		/* Bits 0-1 */
     __kCFArrayImmutable = 0,
@@ -314,7 +322,13 @@ static CFArrayRef __CFArrayCreateInit(CFAllocatorRef allocator, UInt32 flags, CF
     case __kCFArrayDeque:
 	break;
     }
-    memory = (struct __CFArray*)_CFRuntimeCreateInstance(allocator, _kCFRuntimeIDCFArray, size, NULL);
+    /* THE CATEGORY SAYS WHICH CLASS CORE FOUNDATION'S OBJECT SHOULD WEAR, and it is the only place the
+     * mutable half can be distinguished: CFMutableArrayRef and CFArrayRef SHARE ONE TYPE ID, so the type
+     * alone cannot say which. __kCFArrayDeque is the mutable representation. Apple picks at creation too
+     * (__NSCFArray against __NSCFMutableArray). Non-NULL means "the mutable category". */
+    memory = (struct __CFArray*)_CFRuntimeCreateInstance(allocator, _kCFRuntimeIDCFArray, size,
+                                                        (__CFBitfieldGetValue(flags, 1, 0) == __kCFArrayDeque)
+                                                        ? (unsigned char *)"CFMutableArray" : NULL);
     if (NULL == memory) {
 	return NULL;
     }

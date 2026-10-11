@@ -370,6 +370,9 @@ extern void *object_getClass(void *obj);
  * _CFRuntimeCreateInstance asks what a Core Foundation object should wear. */
 #if defined(__OBJC__)
 static uintptr_t __CFRuntimeCFOwnClassTable[__CFRuntimeClassTableSize];
+/* THE MUTABLE HALF'S CLASS, keyed by the SAME type id -- the two halves share it, which is exactly why an
+ * instance's class cannot come from the type id and the creation category says it instead. */
+static uintptr_t __CFRuntimeCFOwnMutableClassTable[__CFRuntimeClassTableSize];
 
 /* AGORA: THE SAME CLASSES, AS A LIST. CFRetain and CFRelease have to ask "is this object Core
  * Foundation's own?", and they ask it on EVERY call, so the answer cannot be a walk of the type-id
@@ -466,6 +469,7 @@ CF_PRIVATE CFTypeID _CFBridgedTypeIDForObject(const void *obj) {
  * that the encoding must match the method being replaced -- Q@: for -length, S@:Q for -characterAtIndex:.
  * libobjc2 reports 'incorrect signature' when it does not match, rather than failing silently. */
 extern Class objc_allocateClassPair(Class superclass, const char *name, size_t extraBytes);
+extern Class objc_getClass(const char *name);
 extern BOOL class_addMethod(Class cls, SEL name, IMP imp, const char *types);
 extern void objc_registerClassPair(Class cls);
 
@@ -686,6 +690,89 @@ static const cf_own_method cf_array_methods[] = {
 	{ "count", (IMP)cf_imp_array_count, "Q@:" },
 	{ "objectAtIndex:", (IMP)cf_imp_array_object_at, "@@:Q" },
 	{ NULL, NULL, NULL },
+};
+
+/* ---------------------------------------------------------------------------------------------------- */
+/* THE MUTABLE HALF: ONE TYPE ID, A SECOND CLASS, AND THE STORAGE OPERATIONS AS THE PRIMITIVES           */
+/* ---------------------------------------------------------------------------------------------------- */
+/* CFMutableArrayRef and CFArrayRef SHARE ONE TYPE ID, so nothing about an object says which it is. Apple
+ * picks the class at CREATION and so does this, from the category _CFRuntimeCreateInstance already takes.
+ *
+ * THE PRIMITIVE SET IS FOUNDATION'S SEVEN, the same seven libagora-base's NSMutableArray was routed through
+ * so a class with storage of its own can answer the rest: -count, -objectAtIndex:, -insertObject:atIndex:,
+ * -removeObjectAtIndex:, -removeAllObjects, -replaceObjectAtIndex:withObject: and -fnMutationWord. The last
+ * is why the accessor in CFArray.c exists: a fast-enumeration loop polls an ADDRESS, and it has to be Core
+ * Foundation's counter.
+ *
+ * -initWithCapacity: IS A NO-OP ON PURPOSE: a CFArrayCreateMutable object is already built, and inheriting
+ * Foundation's initialiser would allocate FOUNDATION's storage and write its ivars into this object.
+ * Anything not on this list must not be inherited from NSMutableArray either -- the list is the contract.
+ *
+ * AND THE TYPES OF THESE METHODS COME FROM FOUNDATION AND NOT FROM HERE: see the note above
+ * cf_bridged_subclass. An abbreviated encoding gets a two-argument selector NO SEND AT ALL. */
+static void cf_imp_mutable_array_insert(id self, SEL _cmd, id object, unsigned long index)
+{
+	(void)_cmd;
+	CFArrayInsertValueAtIndex((CFMutableArrayRef)self, (CFIndex)index, (const void *)object);
+}
+
+static void cf_imp_mutable_array_remove(id self, SEL _cmd, unsigned long index)
+{
+	(void)_cmd;
+	CFArrayRemoveValueAtIndex((CFMutableArrayRef)self, (CFIndex)index);
+}
+
+static void cf_imp_mutable_array_remove_all(id self, SEL _cmd)
+{
+	(void)_cmd;
+	CFArrayRemoveAllValues((CFMutableArrayRef)self);
+}
+
+static void cf_imp_mutable_array_replace(id self, SEL _cmd, unsigned long index, id object)
+{
+	(void)_cmd;
+	CFArraySetValueAtIndex((CFMutableArrayRef)self, (CFIndex)index, (const void *)object);
+}
+
+static unsigned long *cf_imp_mutable_array_mutation_word(id self, SEL _cmd)
+{
+	(void)_cmd;
+	return __CFArrayGetMutationWord((CFArrayRef)self);
+}
+
+static id cf_imp_mutable_array_init_with_capacity(id self, SEL _cmd, unsigned long capacity)
+{
+	(void)_cmd; (void)capacity;
+	return self;
+}
+
+/* The types below are FALLBACKS. What is registered is the encoding of FOUNDATION'S OWN method for the
+ * selector, found on the superclass when the class is built; these strings are reached only if Foundation
+ * has no such method at all. */
+static const cf_own_method cf_mutable_array_methods[] = {
+	{ "count", (IMP)cf_imp_array_count, "Q@:" },
+	{ "objectAtIndex:", (IMP)cf_imp_array_object_at, "@@:Q" },
+	{ "insertObject:atIndex:", (IMP)cf_imp_mutable_array_insert, "v@:@@Q" },
+	{ "removeObjectAtIndex:", (IMP)cf_imp_mutable_array_remove, "v@:Q" },
+	{ "removeAllObjects", (IMP)cf_imp_mutable_array_remove_all, "v@:" },
+	{ "replaceObjectAtIndex:withObject:", (IMP)cf_imp_mutable_array_replace, "v@:Q@@" },
+	{ "fnMutationWord", (IMP)cf_imp_mutable_array_mutation_word, "^Q@:" },
+	{ "initWithCapacity:", (IMP)cf_imp_mutable_array_init_with_capacity, "@@:Q" },
+	{ NULL, NULL, NULL },
+};
+
+/* THE TYPES THAT HAVE A MUTABLE HALF, AND WHAT EACH ONE IS A KIND OF. The superclass is FOUNDATION'S,
+ * named by string and found with objc_getClass when the owned class is built -- so a Foundation that
+ * renamed or dropped one gets NO mutable class, and the loud raise that comes with it, rather than a class
+ * built on the wrong parent. */
+static const struct {
+	CFTypeID type;
+	const char *name;
+	const char *superclass;
+	const cf_own_method *methods;
+} cf_own_mutable_classes[] = {
+	{ _kCFRuntimeIDCFArray, "__NSCFMutableArray", "NSMutableArray", cf_mutable_array_methods },
+	{ 0, NULL, NULL, NULL },
 };
 
 /* NSData PRIMITIVES, AND THEY ARE THREE. AGDataItems, AGDataEmpty and AGDataMutable implement NO methods
@@ -1848,6 +1935,42 @@ static uintptr_t cf_bridged_subclass(CFTypeID typeID, const void *cls_ref)
 	if (typeID == _kCFRuntimeIDCFBoolean) {
 		__CFBooleanBindOwnedClass((void *)sub);
 	}
+	/* AND THE MUTABLE HALF, IF THIS TYPE HAS ONE: the same construction over Foundation's MUTABLE class,
+	 * with each method's TYPES TAKEN FROM FOUNDATION'S PROTOTYPE. */
+	for (size_t m = 0; cf_own_mutable_classes[m].name != NULL; m++) {
+		Class superclass;
+		Class msub;
+
+		if (cf_own_mutable_classes[m].type != typeID) {
+			continue;
+		}
+		superclass = objc_getClass(cf_own_mutable_classes[m].superclass);
+		if (superclass == NULL) {
+			break;
+		}
+		msub = objc_allocateClassPair(superclass, cf_own_mutable_classes[m].name, 0);
+		if (msub == NULL) {
+			break;
+		}
+		for (size_t i = 0; cf_own_mutable_classes[m].methods[i].name != NULL; i++) {
+			SEL sel = sel_registerName(cf_own_mutable_classes[m].methods[i].name);
+			Method prototype = class_getInstanceMethod(superclass, sel);
+			const char *types = (prototype != NULL) ? method_getTypeEncoding(prototype)
+							       : cf_own_mutable_classes[m].methods[i].types;
+
+			class_addMethod(msub, sel, cf_own_mutable_classes[m].methods[i].imp, types);
+		}
+		for (size_t i = 0; cf_object_methods[i].name != NULL; i++) {
+			class_addMethod(msub, sel_registerName(cf_object_methods[i].name), cf_object_methods[i].imp,
+					cf_object_methods[i].types);
+		}
+		objc_registerClassPair(msub);
+		if (__CFRuntimeOwnedClassCount < __CFRuntimeMaxOwnedClasses) {
+			__CFRuntimeOwnedClasses[__CFRuntimeOwnedClassCount++] = (uintptr_t)msub;
+		}
+		__CFRuntimeCFOwnMutableClassTable[typeID] = (uintptr_t)msub;
+		break;
+	}
 	return (uintptr_t)sub;
 }
 #endif
@@ -1866,7 +1989,14 @@ Boolean _CFIsObjC(CFTypeID typeID, void *obj) {
     /* A CORE FOUNDATION OBJECT IS NOT A BRIDGED OBJECT, even though it is a subclass of one. Its methods
      * ARE Core Foundation's, so dispatching to them would be Core Foundation asking itself -- the
      * recursion that would follow from -length calling CFStringGetLength. */
-    if (__CFRuntimeCFOwnClassTable[typeID] != 0 && (uintptr_t)object_getClass((void *)obj) == __CFRuntimeCFOwnClassTable[typeID]) {
+    /* BOTH HALVES, AND THE MUTABLE ONE IS NOT AN OPTIMISATION. With the mutable class in place but this
+     * refusal still comparing against ONE table, -count on a Core Foundation mutable array dispatched back
+     * into the class that answers it and RECURSED. MEASURED: 2618 nested calls on one object, then SIGSEGV.
+     * A type's mutable class is as much Core Foundation's own as its immutable one. */
+    if ((__CFRuntimeCFOwnClassTable[typeID] != 0
+	 && (uintptr_t)object_getClass((void *)obj) == __CFRuntimeCFOwnClassTable[typeID])
+	|| (__CFRuntimeCFOwnMutableClassTable[typeID] != 0
+	    && (uintptr_t)object_getClass((void *)obj) == __CFRuntimeCFOwnMutableClassTable[typeID])) {
         return false;
     }
 #endif
@@ -2163,7 +2293,14 @@ CFTypeRef _CFRuntimeCreateInstance(CFAllocatorRef allocator, CFTypeID typeID, CF
 #if defined(__OBJC__)
     /* A CORE FOUNDATION OBJECT WEARS CORE FOUNDATION'S CLASS FOR ITS TYPE, or none when the type has not
      * been bridged -- kCFBooleanTrue's isa has always been 0. */
-    memory->_cfisa = __CFRuntimeCFOwnClassTable[typeID];
+    /* AND THE CATEGORY DECIDES WHICH OF THE TWO CLASSES THIS INSTANCE WEARS. The type id cannot: the two
+     * halves share one, and the constructors that pass a category are the ones that made a mutable object.
+     * A type with no mutable half ignores the category here. */
+    if (category != NULL && __CFRuntimeCFOwnMutableClassTable[typeID] != 0) {
+        memory->_cfisa = __CFRuntimeCFOwnMutableClassTable[typeID];
+    } else {
+        memory->_cfisa = __CFRuntimeCFOwnClassTable[typeID];
+    }
 #else
     memory->_cfisa = 0;
 #endif
