@@ -1675,7 +1675,155 @@ static const cf_own_method cf_attributed_string_methods[] = {
  * MEASURED AFTER BOTH FIXES: the view describes "hello", -appendString: on it reaches the attributed string
  * (CF length 5 -> 6), -replaceCharactersInRange: still does, and the two agree afterwards. A Core Foundation
  * attributed string now hands out a working mutable-string view through Foundation's door.
- */static char cf_imp_charset_character_member(id self, SEL _cmd, unsigned short character)
+ */
+
+static CFAttributedStringRef cf_attributed_from_foundation(id other)
+{
+	CFMutableAttributedStringRef built;
+	NSUInteger length, index;
+
+	if (other == nil) {
+		return NULL;
+	}
+	built = CFAttributedStringCreateMutable(NULL, 0);
+	if (built == NULL) {
+		return NULL;
+	}
+	CFAttributedStringReplaceString(built, CFRangeMake(0, 0), (CFStringRef)[other string]);
+	length = (NSUInteger)[other length];
+	index = 0;
+	while (index < length) {
+		NSRange effective = NSMakeRange(0, 0);
+		NSDictionary *attrs = (NSDictionary *)[other attributesAtIndex:index effectiveRange:&effective];
+
+		if (effective.length == 0) {
+			break;
+		}
+		if (attrs != nil) {
+			CFAttributedStringSetAttributes(built, CFRangeMake((CFIndex)index, (CFIndex)effective.length),
+							(CFDictionaryRef)attrs, true);
+		}
+		index += effective.length;
+	}
+	return (CFAttributedStringRef)built;
+}
+
+static void cf_imp_mutable_attributed_set_string(id self, SEL _cmd, NSRange range, id str)
+{
+	(void)_cmd;
+	CFAttributedStringReplaceString((CFMutableAttributedStringRef)self,
+					CFRangeMake((CFIndex)range.location, (CFIndex)range.length), (CFStringRef)str);
+}
+
+static void cf_imp_mutable_attributed_replace_attributed(id self, SEL _cmd, NSRange range, id other)
+{
+	CFAttributedStringRef converted;
+
+	(void)_cmd;
+	converted = cf_attributed_from_foundation(other);
+	if (converted != NULL) {
+		CFAttributedStringReplaceAttributedString((CFMutableAttributedStringRef)self,
+							  CFRangeMake((CFIndex)range.location, (CFIndex)range.length), converted);
+		CFRelease(converted);
+	}
+}
+
+static void cf_imp_mutable_attributed_insert(id self, SEL _cmd, id other, unsigned long loc)
+{
+	cf_imp_mutable_attributed_replace_attributed(self, _cmd, NSMakeRange((NSUInteger)loc, 0), other);
+}
+
+static void cf_imp_mutable_attributed_append(id self, SEL _cmd, id other)
+{
+	CFIndex length = CFAttributedStringGetLength((CFAttributedStringRef)self);
+
+	cf_imp_mutable_attributed_replace_attributed(self, _cmd, NSMakeRange((NSUInteger)length, 0), other);
+}
+
+static void cf_imp_mutable_attributed_delete(id self, SEL _cmd, NSRange range)
+{
+	(void)_cmd;
+	CFAttributedStringReplaceString((CFMutableAttributedStringRef)self,
+					CFRangeMake((CFIndex)range.location, (CFIndex)range.length), CFSTR(""));
+}
+
+static void cf_imp_mutable_attributed_set_attributed(id self, SEL _cmd, id other)
+{
+	CFIndex length = CFAttributedStringGetLength((CFAttributedStringRef)self);
+
+	cf_imp_mutable_attributed_replace_attributed(self, _cmd, NSMakeRange(0, (NSUInteger)length), other);
+}
+
+static void cf_imp_mutable_attributed_add_attribute(id self, SEL _cmd, id name, id value, NSRange range)
+{
+	(void)_cmd;
+	CFAttributedStringSetAttribute((CFMutableAttributedStringRef)self,
+				       CFRangeMake((CFIndex)range.location, (CFIndex)range.length),
+				       (CFStringRef)name, (CFTypeRef)value);
+}
+
+static void cf_imp_mutable_attributed_add_attributes(id self, SEL _cmd, id attrs, NSRange range)
+{
+	(void)_cmd;
+	CFAttributedStringSetAttributes((CFMutableAttributedStringRef)self,
+					CFRangeMake((CFIndex)range.location, (CFIndex)range.length),
+					(CFDictionaryRef)attrs, false);
+}
+
+static void cf_imp_mutable_attributed_set_attributes(id self, SEL _cmd, id attrs, NSRange range)
+{
+	(void)_cmd;
+	CFAttributedStringSetAttributes((CFMutableAttributedStringRef)self,
+					CFRangeMake((CFIndex)range.location, (CFIndex)range.length),
+					(CFDictionaryRef)attrs, true);
+}
+
+static void cf_imp_mutable_attributed_remove_attribute(id self, SEL _cmd, id name, NSRange range)
+{
+	(void)_cmd;
+	CFAttributedStringRemoveAttribute((CFMutableAttributedStringRef)self,
+					  CFRangeMake((CFIndex)range.location, (CFIndex)range.length), (CFStringRef)name);
+}
+
+static void cf_imp_mutable_attributed_begin_editing(id self, SEL _cmd)
+{
+	(void)_cmd;
+	CFAttributedStringBeginEditing((CFMutableAttributedStringRef)self);
+}
+
+static void cf_imp_mutable_attributed_end_editing(id self, SEL _cmd)
+{
+	(void)_cmd;
+	CFAttributedStringEndEditing((CFMutableAttributedStringRef)self);
+}
+
+static id cf_imp_mutable_attributed_init(id self, SEL _cmd)
+{
+	(void)_cmd;
+	return self;
+}
+
+static const cf_own_method cf_mutable_attributed_string_methods[] = {
+	{ "string", (IMP)cf_imp_attributed_string, "@@:" },
+	{ "length", (IMP)cf_imp_attributed_length, "Q@:" },
+	{ "attributesAtIndex:effectiveRange:", (IMP)cf_imp_attributed_attributes, "@@:Q^{_NSRange=QQ}" },
+	{ "replaceCharactersInRange:withString:", (IMP)cf_imp_mutable_attributed_set_string, "v@:{_NSRange=QQ}@" },
+	{ "replaceCharactersInRange:withAttributedString:", (IMP)cf_imp_mutable_attributed_replace_attributed, "v@:{_NSRange=QQ}@" },
+	{ "insertAttributedString:atIndex:", (IMP)cf_imp_mutable_attributed_insert, "v@:@@Q" },
+	{ "appendAttributedString:", (IMP)cf_imp_mutable_attributed_append, "v@:@" },
+	{ "deleteCharactersInRange:", (IMP)cf_imp_mutable_attributed_delete, "v@:{_NSRange=QQ}" },
+	{ "setAttributedString:", (IMP)cf_imp_mutable_attributed_set_attributed, "v@:@" },
+	{ "addAttribute:value:range:", (IMP)cf_imp_mutable_attributed_add_attribute, "v@:@@{_NSRange=QQ}" },
+	{ "addAttributes:range:", (IMP)cf_imp_mutable_attributed_add_attributes, "v@:@{_NSRange=QQ}" },
+	{ "setAttributes:range:", (IMP)cf_imp_mutable_attributed_set_attributes, "v@:@{_NSRange=QQ}" },
+	{ "removeAttribute:range:", (IMP)cf_imp_mutable_attributed_remove_attribute, "v@:@{_NSRange=QQ}" },
+	{ "beginEditing", (IMP)cf_imp_mutable_attributed_begin_editing, "v@:" },
+	{ "endEditing", (IMP)cf_imp_mutable_attributed_end_editing, "v@:" },
+	{ "init", (IMP)cf_imp_mutable_attributed_init, "@@:" },
+	{ NULL, NULL, NULL },
+};
+
+static char cf_imp_charset_character_member(id self, SEL _cmd, unsigned short character)
 {
 	(void)_cmd;
 	return (char)(CFCharacterSetIsCharacterMember((CFCharacterSetRef)self, (UniChar)character) ? 1 : 0);
