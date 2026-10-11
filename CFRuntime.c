@@ -765,15 +765,7 @@ static const cf_own_method cf_mutable_array_methods[] = {
  * named by string and found with objc_getClass when the owned class is built -- so a Foundation that
  * renamed or dropped one gets NO mutable class, and the loud raise that comes with it, rather than a class
  * built on the wrong parent. */
-static const struct {
-	CFTypeID type;
-	const char *name;
-	const char *superclass;
-	const cf_own_method *methods;
-} cf_own_mutable_classes[] = {
-	{ _kCFRuntimeIDCFArray, "__NSCFMutableArray", "NSMutableArray", cf_mutable_array_methods },
-	{ 0, NULL, NULL, NULL },
-};
+
 
 /* NSData PRIMITIVES, AND THEY ARE THREE. AGDataItems, AGDataEmpty and AGDataMutable implement NO methods
  * of the byte surface between them -- the front's OWN ivars are the storage, so -length and -bytes are
@@ -880,6 +872,64 @@ static const cf_own_method cf_dictionary_methods[] = {
 	{ "objectForKey:", (IMP)cf_imp_dictionary_object_for_key, "@@:@" },
 	{ "keyEnumerator", (IMP)cf_imp_dictionary_key_enumerator, "@@:" },
 	{ NULL, NULL, NULL },
+};
+
+/* NSDictionary's MUTABLE PRIMITIVES, AND THE THREE THAT MATTER ARE FOUNDATION'S OWN INTERNAL DOORS --
+ * -setObjectInternal:forKey:, -removeObjectInternalForKey: and -removeAllInternalObjects -- which are where
+ * ITS storage operations live and therefore exactly what a class with storage elsewhere must answer. The
+ * first three entries are the immutable class's, since a mutable dictionary must also read. */
+static void cf_imp_mutable_dictionary_set(id self, SEL _cmd, id value, id key)
+{
+	(void)_cmd;
+	CFDictionarySetValue((CFMutableDictionaryRef)self, (const void *)key, (const void *)value);
+}
+
+static void cf_imp_mutable_dictionary_remove(id self, SEL _cmd, id key)
+{
+	(void)_cmd;
+	CFDictionaryRemoveValue((CFMutableDictionaryRef)self, (const void *)key);
+}
+
+static void cf_imp_mutable_dictionary_remove_all(id self, SEL _cmd)
+{
+	(void)_cmd;
+	CFDictionaryRemoveAllValues((CFMutableDictionaryRef)self);
+}
+
+static unsigned long *cf_imp_mutable_dictionary_mutation_word(id self, SEL _cmd)
+{
+	(void)_cmd;
+	return __CFBasicHashGetMutationWord((void *)self);
+}
+
+static id cf_imp_mutable_dictionary_init(id self, SEL _cmd)
+{
+	(void)_cmd;
+	return self;
+}
+
+static const cf_own_method cf_mutable_dictionary_methods[] = {
+	{ "count", (IMP)cf_imp_dictionary_count, "Q@:" },
+	{ "objectForKey:", (IMP)cf_imp_dictionary_object_for_key, "@@:@" },
+	{ "keyEnumerator", (IMP)cf_imp_dictionary_key_enumerator, "@@:" },
+	{ "setObjectInternal:forKey:", (IMP)cf_imp_mutable_dictionary_set, "v@:@@" },
+	{ "removeObjectInternalForKey:", (IMP)cf_imp_mutable_dictionary_remove, "v@:@" },
+	{ "removeAllInternalObjects", (IMP)cf_imp_mutable_dictionary_remove_all, "v@:" },
+	{ "fnMutationWord", (IMP)cf_imp_mutable_dictionary_mutation_word, "^Q@:" },
+	{ "init", (IMP)cf_imp_mutable_dictionary_init, "@@:" },
+	{ "initWithCapacity:", (IMP)cf_imp_mutable_dictionary_init, "@@:Q" },
+	{ NULL, NULL, NULL },
+};
+
+static const struct {
+	CFTypeID type;
+	const char *name;
+	const char *superclass;
+	const cf_own_method *methods;
+} cf_own_mutable_classes[] = {
+	{ _kCFRuntimeIDCFArray, "__NSCFMutableArray", "NSMutableArray", cf_mutable_array_methods },
+	{ _kCFRuntimeIDCFDictionary, "__NSCFMutableDictionary", "NSMutableDictionary", cf_mutable_dictionary_methods },
+	{ 0, NULL, NULL, NULL },
 };
 
 static unsigned long cf_imp_set_count(id self, SEL _cmd)
@@ -2371,6 +2421,35 @@ void _CFRuntimeSetInstanceTypeID(CFTypeRef cf, CFTypeID newTypeID) {
     // transferred and there will probably be a crash later when the
     // object is freed too early.
     __CFRuntimeSetValue(cf, TYPE_ID_END, TYPE_ID_START, newTypeID);
+}
+
+/* THE SAME RE-STAMPING, ASKED WHICH CATEGORY THE INSTANCE IS. A dictionary and a set are created as
+ * CFBasicHash objects and then told which CF type they are; the mutable half of each shares its type id
+ * with the immutable half, so the type says nothing and the CATEGORY has to -- exactly as it does at
+ * creation for the types that build their own object (see _CFRuntimeCreateInstance). */
+CF_PRIVATE void _CFRuntimeSetInstanceTypeIDAndIsaForCategory(CFTypeRef cf, CFTypeID newTypeID, const unsigned char *category) {
+    _CFRuntimeSetInstanceTypeID(cf, newTypeID);
+#if DEPLOYMENT_RUNTIME_SWIFT
+    if (_CFTypeGetClass(cf) != __CFISAForTypeID(newTypeID)) {
+        ((CFSwiftRef)cf)->isa = (uintptr_t)__CFISAForTypeID(newTypeID);
+    }
+#elif defined(__OBJC__)
+    /* AGORA: THE isa HALF, WHICH THE NON-SWIFT BUILD NEVER HAD AND WHICH THREE TYPES ARE BUILT ON. A
+     * CFDictionary and a CFSet are not created as themselves: they are a CFBasicHash -- pure Core
+     * Foundation, no bridge -- and then RETYPED here (CFDictionary.c, CFSet.c, CFBag.c, CFBinaryPList.c
+     * all come through this door). _CFRuntimeCreateInstance gave that hashtable the class of a type id
+     * that is NOT bridged, which is no class at all, so `[(id)CFDictionaryCreate(...) count]` dereferenced
+     * a zero isa -- measured, as the last two SIGSEGVs in the suite.
+     *
+     * THE OWNED CLASS FOR THE NEW TYPE AND NOT __CFISAForTypeID, for the reason that whole table exists:
+     * the bridge class is FOUNDATION's and would make a Core Foundation object wear it. Guarded on the
+     * object having NO class, so a Foundation object that is ever retyped keeps its own isa. */
+    if (_CFTypeGetClass(cf) == 0) {
+        ((CFRuntimeBase *)cf)->_cfisa = ((category != NULL && __CFRuntimeCFOwnMutableClassTable[newTypeID] != 0)
+
+             ? __CFRuntimeCFOwnMutableClassTable[newTypeID] : __CFRuntimeCFOwnClassTable[newTypeID]);
+    }
+#endif
 }
 
 CF_PRIVATE void _CFRuntimeSetInstanceTypeIDAndIsa(CFTypeRef cf, CFTypeID newTypeID) {

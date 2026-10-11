@@ -1580,6 +1580,16 @@ const CFRuntimeClass __CFBasicHashClass = {
     __CFBasicHashCopyDescription
 };
 
+/* THE ADDRESS THE ENUMERATION LOOP POLLS -- the same field this file's own -countByEnumeratingWithState
+ * equivalent hands out (see where state->mutationsPtr is set below), which is why a Foundation loop over a
+ * Core Foundation dictionary watches Core Foundation's own word. */
+CF_PRIVATE unsigned long *__CFBasicHashGetMutationWord(void *ht)
+{
+    CFBasicHashRef hash = (CFBasicHashRef)ht;
+
+    return (unsigned long *)&hash->bits;
+}
+
 CF_PRIVATE CFTypeID CFBasicHashGetTypeID(void) {
     return _kCFRuntimeIDCFBasicHash;
 }

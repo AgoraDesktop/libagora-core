@@ -865,6 +865,14 @@ CF_PRIVATE void __CFBooleanBindOwnedClass(void *cls);
  * address of CORE FOUNDATION's counter when it answers the primitive -fnMutationWord. */
 CF_PRIVATE unsigned long *__CFArrayGetMutationWord(CFArrayRef array);
 
+/* THE SAME THING FOR A DICTIONARY, which is a CFBasicHash underneath: Core Foundation's own enumeration
+ * door polls &ht->bits, so that is the address a Foundation loop must watch. */
+CF_PRIVATE unsigned long *__CFBasicHashGetMutationWord(void *ht);
+
+/* AND THE RE-STAMPING A DICTIONARY OR A SET NEEDS: both are created as CFBasicHash objects and then told
+ * which CF type they are, and a MUTABLE one has to be told the mutable class. */
+CF_PRIVATE void _CFRuntimeSetInstanceTypeIDAndIsaForCategory(CFTypeRef cf, CFTypeID newTypeID, const unsigned char *category);
+
 #if DEPLOYMENT_RUNTIME_SWIFT
 #define CF_IS_SWIFT(type, obj) (_CFIsSwift(type, (CFSwiftRef)obj))
 

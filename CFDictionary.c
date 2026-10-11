@@ -150,7 +150,9 @@ CFMutableDictionaryRef CFDictionaryCreateMutable(CFAllocatorRef allocator, CFInd
         if (capacity > 1000) capacity = 1000;
         CFBasicHashSetCapacity(ht, capacity);
     }
-    _CFRuntimeSetInstanceTypeIDAndIsa(ht, typeID);
+    /* THE CATEGORY, WHICH IS THE ONE THING THAT SAYS THIS INSTANCE IS THE MUTABLE HALF -- the type id is
+     * the same for the mutable and immutable dictionaries, and this is where the mutable one is told. */
+    _CFRuntimeSetInstanceTypeIDAndIsaForCategory(ht, typeID, (const unsigned char *)"CFMutableDictionary");
     if (__CFOASafe) __CFSetLastAllocationEventName(ht, "CFDictionary (mutable)");
     return (CFMutableDictionaryRef)ht;
 }
