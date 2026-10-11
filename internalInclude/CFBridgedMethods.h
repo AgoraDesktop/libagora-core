@@ -80,7 +80,7 @@ typedef struct __CFString *CFMutableStringRef;
 - (const UniChar *)_fastCharacterContents;
 - (Boolean)_encodingCantBeStoredInEightBitCFString;
 /* BOOL, WHICH IS COCOA RETURN AND NOT CORE FOUNDATION ONE: CFStringGetBytes answers a count through a plain CF_IS_OBJC block instead of casting this. */
-- (BOOL)getBytes:(uint8_t *)buffer maxLength:(NSUInteger)maxLength usedLength:(NSUInteger *)usedLength encoding:(NSUInteger)encoding options:(NSUInteger)options range:(NSRange)range remainingRange:(NSRange *)remaining;
+- (BOOL)getBytes:(void *)buffer maxLength:(NSUInteger)maxLength usedLength:(NSUInteger *)usedLength encoding:(NSUInteger)encoding options:(NSUInteger)options range:(NSRange)range remainingRange:(NSRange *)remaining;
 /* NSURL: the true CFURL behind it, which _CFURLFromNSURL is the only caller of. */
 - (CFURLRef)_cfurl;
 /* NSTimeZone: the three doors that read a zone's state at an instant. Core Foundation cannot make
