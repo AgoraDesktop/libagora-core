@@ -49,7 +49,10 @@ typedef struct __CFString *CFMutableStringRef;
 #include "CFBridgingTypes.h"	/* a sibling, reached the way CFInternal.h reaches its own */
 
 @protocol __CFBridgedMethods
-/* NSArray/NSMutableArray: CFArray.c's immutability test. */
+/* NSArray/NSMutableArray: CFArray.c's immutability test. THAT SITE FOUND THE CLASS BY NAME WITH
+ * objc_getClass RATHER THAN NAMING IT AS A CLASS REFERENCE, which is what used to make libagora-core.so
+ * reference a symbol only libagora-base defines and so fail to load on its own; see the note there. The door
+ * itself is unchanged -- -isKindOfClass: with the same class, when Foundation is loaded. */
 - (BOOL)isKindOfClass:(Class)cls;
 /* NSString: CFString.c's hash length. */
 - (NSUInteger)length;

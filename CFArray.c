@@ -982,6 +982,11 @@ CF_PRIVATE void _CFArraySortValues(CFMutableArrayRef array, CFComparatorFunction
     if (values != buffer) CFAllocatorDeallocate(kCFAllocatorSystemDefault, values);
 }
 
+/* DECLARED HERE THE WAY CFRuntime.c DECLARES IT, rather than by including <objc/runtime.h> into a Core
+ * Foundation translation unit: this file needs the one function, and CoreFoundation_Prefix.h already brings
+ * in <objc/objc.h> for the types. */
+extern Class objc_getClass(const char *name);
+
 void CFArraySortValues(CFMutableArrayRef array, CFRange range, CFComparatorFunction comparator, void *context) {
     FAULT_CALLBACK((void **)&(comparator));
     __CFArrayValidateRange(array, range, __PRETTY_FUNCTION__);
@@ -989,8 +994,32 @@ void CFArraySortValues(CFMutableArrayRef array, CFRange range, CFComparatorFunct
     Boolean immutable = false;
     if (CF_IS_OBJC(_kCFRuntimeIDCFArray, array)) {
         BOOL result;
-        result = CF_OBJC_CALLV((NSMutableArray *)array, isKindOfClass:[NSMutableArray class]);
-        immutable = !result;
+        /* AND THIS IS THE ONE PLACE IN THIS FILE THAT NEEDS A CLASS OBJECT, WHICH IS WHY IT IS THE ONE PLACE
+         * THAT COULD NOT LOAD CORE FOUNDATION BY ITSELF. `[NSMutableArray class]` is a CLASS message: the
+         * compiler needs the class object and emits an undefined ._OBJC_REF_CLASS_NSMutableArray for it. Only
+         * libagora-base defines that symbol, and the loader resolves it EAGERLY, so a program linking Core
+         * Foundation alone died BEFORE MAIN:
+         *
+         *   symbol lookup error: libagora-core.so: undefined symbol: ._OBJC_REF_CLASS_NSMutableArray
+         *
+         * MEASURED, AND IT IS THE WHOLE OF THE COUPLING: that was the ONLY undefined class reference in the
+         * library, and out of 172 CF_OBJC_FUNCDISPATCHV and 24 CF_OBJC_CALLV call sites this was the only one
+         * producing it -- every other site sends an INSTANCE message, which needs a selector and no class
+         * object. Finding the class by NAME is the route CFRuntime.c already takes for the mutable
+         * superclasses (its cf_own_mutable_classes table, objc_getClass), and with Foundation loaded the
+         * answer is the same class it always was.
+         *
+         * WITH NO OBJECTIVE-C RUNTIME LOADED NO OBJECT CAN BE CF_IS_OBJC IN THE FIRST PLACE, so the NULL
+         * branch is unreachable; treating the array as immutable is the reading that cannot corrupt anything,
+         * which is why it is the one taken. */
+        Class mutableArray = objc_getClass("NSMutableArray");
+
+        if (mutableArray == NULL) {
+            immutable = true;
+        } else {
+            result = CF_OBJC_CALLV((NSMutableArray *)array, isKindOfClass:(id)mutableArray);
+            immutable = !result;
+        }
     } else if (CF_IS_SWIFT(_kCFRuntimeIDCFArray, array)) {
 #if DEPLOYMENT_RUNTIME_SWIFT
         Boolean result = __CFSwiftBridge.NSArray.isSubclassOfNSMutableArray(array);
