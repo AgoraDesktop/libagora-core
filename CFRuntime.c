@@ -1633,11 +1633,28 @@ static const cf_own_method cf_attributed_string_methods[] = {
  * primitive pair this class already answers -- -string and -attributesAtIndex:effectiveRange: -- and builds
  * a Core Foundation attributed string run by run. Casting one is what segfaulted the character sets.
  *
- * -mutableString IS NOT ANSWERED AND CANNOT BE: it hands out a live mutable string view of the receiver,
- * and Core Foundation's attributed string exposes no such view -- it keeps a CFMutableString internally but
- * offers no way to hand it out. A caller reaching it through Foundation would read Foundation's storage, so
- * this is recorded as the one gap rather than papered over. */
-static CFAttributedStringRef cf_attributed_from_foundation(id other)
+ * -mutableString IS NOT WHAT I FIRST RECORDED HERE, AND THE FIRST VERSION OF THIS COMMENT WAS WRONG ABOUT
+ * CORE FOUNDATION. It said Core Foundation "keeps its own mutable string internally without offering any
+ * way to hand it out". CORE FOUNDATION'S OWN HEADER DECLARES THAT ACCESSOR: CFAttributedStringGetMutableString,
+ * which "gets the string ... as a mutable string, allowing editing the character contents ... Attributes
+ * corresponding to the edited range are appropriately modified". MEASURED, and this is what is true:
+ *
+ *   1. CFAttributedStringGetMutableString DISPATCHES to -mutableString for a Foundation attributed string,
+ *      and a Foundation one answers it with a view.
+ *   2. For CORE FOUNDATION'S OWN attributed string the native path is COMMENTED OUT in CFAttributedString.c
+ *      and the function returns NULL -- an upstream gap in this tree, not this bridge's.
+ *   3. OUR OWNED CLASS therefore answers NULL through Core Foundation's door (it is Core Foundation's own
+ *      object, so the native path runs) -- which matches what Core Foundation does for its own objects.
+ *   4. BUT ITS -mutableString IS STILL REACHABLE THROUGH FOUNDATION, inherited from NSMutableAttributedString,
+ *      and it is INCONSISTENT: MEASURED, the view it returns describes itself as EMPTY, -appendString: on it
+ *      changes nothing, and -replaceCharactersInRange:withString: on it DOES change the attributed string.
+ *      Reads wrong, writes partly -- which is worse than refusing, and is why the suite case drives neither
+ *      and says so.
+ *
+ * SO THE HONEST STATUS IS NOT "cannot be bridged" BUT "bridged badly by inheritance, and the two ways out
+ * are to teach Foundation's bridge to read a Core Foundation owner through the public API -- its reads are
+ * what fail -- or to stop answering it. Left as it stands, recorded as measured.
+ */static CFAttributedStringRef cf_attributed_from_foundation(id other)
 {
 	CFMutableAttributedStringRef built;
 	NSUInteger length, index;
