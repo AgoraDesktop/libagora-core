@@ -388,7 +388,12 @@ static CFMutableDataRef __CFDataInit(CFAllocatorRef allocator, _CFDataMutableVar
     if (allocateInline) {
 	size += sizeof(uint8_t) * capacity + sizeof(uint8_t) * 15;	// for 16-byte alignment fixup
     }
-    memory = (CFMutableDataRef)_CFRuntimeCreateInstance(allocator, CFDataGetTypeID(), size, NULL);
+    /* THE CATEGORY, WHICH IS WHAT SAYS THIS INSTANCE IS THE MUTABLE HALF. This initialiser serves all
+     * three varieties -- immutable, fixed-mutable and mutable -- and they SHARE ONE TYPE ID, so the
+     * variety is the only thing that can say which class Core Foundation's own object should wear. */
+    memory = (CFMutableDataRef)_CFRuntimeCreateInstance(allocator, CFDataGetTypeID(), size,
+                                                        ((variety & __kCFMutableMask) != 0)
+                                                        ? (unsigned char *)"CFMutableData" : NULL);
     if (NULL == memory) {
 	return NULL;
     }

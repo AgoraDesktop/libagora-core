@@ -803,6 +803,97 @@ static const cf_own_method cf_data_methods[] = {
 	{ NULL, NULL, NULL },
 };
 
+/* ---------------------------------------------------------------------------------------------------- */
+/* THE MUTABLE HALF OF AN NSData: THE METHODS THAT WRITE FOUNDATION'S STORAGE                            */
+/* ---------------------------------------------------------------------------------------------------- */
+/* SEVEN, AND THEY WERE FOUND BY READING THE CLASS RATHER THAN BY TRUSTING ITS DOCUMENTATION -- the lesson
+ * the mutable string taught at the cost of twenty-one suite cases. libagora-base's NSData.h names the two
+ * buffer accessors (-bytes and -mutableBytes); MEASURED, the mutable class writes storage in exactly these
+ * seven: -mutableBytes, -setLength:, -appendBytes:length:, -replaceBytesInRange:withBytes:length:,
+ * -resetBytesInRange:, -increaseLengthBy: and -setData: (the last reads _length, which is why the cap of
+ * twenty-four lines I first measured with HID it). The three read doors are the immutable class's own.
+ *
+ * EVERY ONE IS ANSWERED, NOT DERIVED, because a method here that Foundation's implementation still runs
+ * writes ITS storage into a Core Foundation object -- the silent corruption this bridge has met. */
+static unsigned char *cf_imp_mutable_data_mutable_bytes(id self, SEL _cmd)
+{
+	(void)_cmd;
+	return (unsigned char *)CFDataGetMutableBytePtr((CFMutableDataRef)self);
+}
+
+static void cf_imp_mutable_data_set_length(id self, SEL _cmd, unsigned long length)
+{
+	(void)_cmd;
+	CFDataSetLength((CFMutableDataRef)self, (CFIndex)length);
+}
+
+static void cf_imp_mutable_data_append(id self, SEL _cmd, const void *bytes, unsigned long length)
+{
+	(void)_cmd;
+	CFDataAppendBytes((CFMutableDataRef)self, (const UInt8 *)bytes, (CFIndex)length);
+}
+
+static void cf_imp_mutable_data_replace(id self, SEL _cmd, NSRange range, const void *bytes, unsigned long length)
+{
+	(void)_cmd;
+	CFDataReplaceBytes((CFMutableDataRef)self, CFRangeMake((CFIndex)range.location, (CFIndex)range.length),
+			   (const UInt8 *)bytes, (CFIndex)length);
+}
+
+static void cf_imp_mutable_data_reset(id self, SEL _cmd, NSRange range)
+{
+	unsigned char *buffer;
+	CFIndex length;
+
+	(void)_cmd;
+	buffer = (unsigned char *)CFDataGetMutableBytePtr((CFMutableDataRef)self);
+	length = CFDataGetLength((CFDataRef)self);
+	if (buffer == NULL || (CFIndex)(range.location + range.length) > length) {
+		return;
+	}
+	memset(buffer + range.location, 0, range.length);
+}
+
+static void cf_imp_mutable_data_increase(id self, SEL _cmd, unsigned long extra)
+{
+	(void)_cmd;
+	CFDataSetLength((CFMutableDataRef)self, CFDataGetLength((CFDataRef)self) + (CFIndex)extra);
+}
+
+static void cf_imp_mutable_data_set_data(id self, SEL _cmd, id other)
+{
+	CFIndex otherLength;
+
+	(void)_cmd;
+	otherLength = (other != nil) ? CFDataGetLength((CFDataRef)other) : 0;
+	CFDataReplaceBytes((CFMutableDataRef)self, CFRangeMake(0, CFDataGetLength((CFDataRef)self)),
+			   (other != nil) ? CFDataGetBytePtr((CFDataRef)other) : NULL, otherLength);
+	CFDataSetLength((CFMutableDataRef)self, otherLength);
+}
+
+static id cf_imp_mutable_data_init_with_capacity(id self, SEL _cmd, unsigned long capacity)
+{
+	(void)_cmd; (void)capacity;
+	return self;
+}
+
+static const cf_own_method cf_mutable_data_methods[] = {
+	{ "length", (IMP)cf_imp_data_length, "Q@:" },
+	{ "bytes", (IMP)cf_imp_data_bytes, "r^v@:" },
+	{ "getBytes:", (IMP)cf_imp_data_get_bytes, "v@:^v" },
+	{ "mutableBytes", (IMP)cf_imp_mutable_data_mutable_bytes, "^v@:" },
+	{ "setLength:", (IMP)cf_imp_mutable_data_set_length, "v@:Q" },
+	{ "appendBytes:length:", (IMP)cf_imp_mutable_data_append, "v@:^vQ" },
+	{ "replaceBytesInRange:withBytes:length:", (IMP)cf_imp_mutable_data_replace, "v@:{_NSRange=QQ}^vQ" },
+	{ "resetBytesInRange:", (IMP)cf_imp_mutable_data_reset, "v@:{_NSRange=QQ}" },
+	{ "increaseLengthBy:", (IMP)cf_imp_mutable_data_increase, "v@:Q" },
+	{ "setData:", (IMP)cf_imp_mutable_data_set_data, "v@:@" },
+	{ "init", (IMP)cf_imp_mutable_data_init_with_capacity, "@@:" },
+	{ "initWithCapacity:", (IMP)cf_imp_mutable_data_init_with_capacity, "@@:Q" },
+	{ "initWithLength:", (IMP)cf_imp_mutable_data_init_with_capacity, "@@:Q" },
+	{ NULL, NULL, NULL },
+};
+
 /* ---------------------------------------------------------------------------
  * THE TWO CONTAINER TYPES, AND THE ONE PRIMITIVE CORE FOUNDATION HAS NO DOOR FOR.
  *
@@ -2020,6 +2111,7 @@ static const struct {
 	{ _kCFRuntimeIDCFDictionary, "__NSCFMutableDictionary", "NSMutableDictionary", cf_mutable_dictionary_methods },
 	{ _kCFRuntimeIDCFSet, "__NSCFMutableSet", "NSMutableSet", cf_mutable_set_methods },
 	{ _kCFRuntimeIDCFString, "__NSCFMutableString", "NSMutableString", cf_mutable_string_methods },
+	{ _kCFRuntimeIDCFData, "__NSCFMutableData", "NSMutableData", cf_mutable_data_methods },
 	{ 0, NULL, NULL, NULL },
 };
 
