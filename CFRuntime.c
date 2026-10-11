@@ -627,7 +627,10 @@ static double cf_imp_number_double(id self, SEL _cmd)
 static unsigned char cf_imp_boolean_kind(id self, SEL _cmd)
 {
 	(void)_cmd; (void)self;
-	return 'C';
+	/* 'c' AND NOT 'C', which is Apple's @encode(BOOL) and what Foundation's Boolean NUMBER answers from the
+	 * other side of the bridge (AGNumberBoolean's -agKind in libagora-base). Matching it here is what keeps
+	 * [@YES isEqual:kCFBooleanTrue] true; the comment in the immutable BOOLEAN row above records the rest. */
+	return 'c';
 }
 
 static long long cf_imp_boolean_ll(id self, SEL _cmd)
