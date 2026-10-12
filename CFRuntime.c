@@ -293,9 +293,35 @@ int __CFConstantStringClassReference[12] = {0};
  * it. The non-Swift path had no one playing Foundation's part, so the blob stayed zeroed and any class
  * operation on a CFSTR segfaulted.
  *
- * Weakly defined here so that libagora-base's strong definition -- its constant-string class for exactly
- * clang's layout -- wins at load, and so that a Core Foundation with no Foundation beside it still links
- * and still gets a zeroed placeholder rather than a missing symbol. */
+ * **AND THE ARRANGEMENT THIS PARAGRAPH DESCRIBES DOES NOT HAPPEN. MEASURED.**
+ *
+ * libagora-base DOES define it strongly — `nm -D` shows `D __CFConstantStringClassReference` at an address
+ * aliased to `._OBJC_CLASS_NSCFConstantString`, exactly as intended, and both libraries are loaded. AND THE
+ * CFSTR STILL BINDS TO THIS ZEROED COPY:
+ *
+ *     the CFSTR's isa         0x7fd030630ef0        <- THIS OBJECT's storage, offset 0x230ef0
+ *     &__CFConstantString...  0x7fd030630ef0        ("the isa should BE this" -- and it is)
+ *     libagora-base's strong  ...21a850             <- never used
+ *     class_getName(isa)      (NULL)                <- a zeroed placeholder, not a class
+ *
+ * **BECAUSE THIS LIBRARY COMES FIRST IN THE LOAD ORDER.** A CFSTR's isa is a symbol reference like any other, and
+ * it resolves to the first definition the loader meets — which is here, in Core Foundation, whenever Core
+ * Foundation is loaded before Foundation. A weak definition only yields to a strong one when both are in the same
+ * scope and the lookup is allowed to continue; a data symbol bound early is simply bound.
+ *
+ * WHAT IT COSTS, FOUR LAYERS UP: `objc_retain` on such a constant sends to a zeroed isa and SEGFAULTS, and the
+ * path that reaches it is this library's own dictionary-key enumerator, used by `-[NSDictionary
+ * isEqualToDictionary:]`:
+ *
+ *     CFEqual(dict, dict) -> -[NSDictionary isEqualToDictionary:]
+ *       -> cf_imp_dictionary_key_enumerator -> cf_imp_snapshot_enumerator
+ *         -> -[NSArray initWithArray:] -> objc_retain -> SIGSEGV
+ *
+ * THE TWO CANDIDATE FIXES, neither attempted here: give this storage the class at STARTUP rather than relying on
+ * the link (`_NSCFConstantString` is a real class in libagora-base, so the fixup can be done once), or drop this
+ * weak definition so that the strong one is the only one there is and a Core-Foundation-alone build learns that
+ * the constant-string class is Foundation's to supply. Both need a test that a CFSTR is an OBJECT — dispatched
+ * to, retained and compared — which this tree does not have. */
 #if TARGET_RT_64_BIT
 __attribute__((weak)) int __CFConstantStringClassReference[24] = {0};
 #else
