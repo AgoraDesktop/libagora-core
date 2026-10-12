@@ -293,35 +293,31 @@ int __CFConstantStringClassReference[12] = {0};
  * it. The non-Swift path had no one playing Foundation's part, so the blob stayed zeroed and any class
  * operation on a CFSTR segfaulted.
  *
- * **AND THE ARRANGEMENT THIS PARAGRAPH DESCRIBES DOES NOT HAPPEN. MEASURED.**
+ * **AND THE ARRANGEMENT WORKS — BUT ONLY IN ONE LOAD ORDER, WHICH COST A FALSE ALARM TO LEARN.** With Foundation
+ * loaded first, libagora-base's strong definition DOES win and a CFSTR IS a real object:
  *
- * libagora-base DOES define it strongly — `nm -D` shows `D __CFConstantStringClassReference` at an address
- * aliased to `._OBJC_CLASS_NSCFConstantString`, exactly as intended, and both libraries are loaded. AND THE
- * CFSTR STILL BINDS TO THIS ZEROED COPY:
+ *     class_getName(isa)                    NSCFConstantString
+ *     CFEqual(two distinct descriptors)     false            (correct)
+ *     faces in the font registry            118              (not 1)
  *
- *     the CFSTR's isa         0x7fd030630ef0        <- THIS OBJECT's storage, offset 0x230ef0
- *     &__CFConstantString...  0x7fd030630ef0        ("the isa should BE this" -- and it is)
- *     libagora-base's strong  ...21a850             <- never used
- *     class_getName(isa)      (NULL)                <- a zeroed placeholder, not a class
+ * **AND `readelf -d` SAYS WHY IT ALWAYS DOES HERE.** Every binary in this tree —
+ * `libagora-base/build/tests/bridges` and `libagora-app/build/libagora-app.so` alike — lists
+ * `libagora-base.so` FIRST and `libagora-core.so` LAST. Foundation first, so the strong definition wins.
+ * WITH CORE FOUNDATION FIRST IT DOES NOT: the CFSTR's isa binds to this file's zeroed storage, `class_getName`
+ * answers NULL, and `objc_retain` on such a constant sends to a zeroed isa and SEGFAULTS.
  *
- * **BECAUSE THIS LIBRARY COMES FIRST IN THE LOAD ORDER.** A CFSTR's isa is a symbol reference like any other, and
- * it resolves to the first definition the loader meets — which is here, in Core Foundation, whenever Core
- * Foundation is loaded before Foundation. A weak definition only yields to a strong one when both are in the same
- * scope and the lookup is allowed to continue; a data symbol bound early is simply bound.
+ *     linked base-first (what this tree does)   class_getName = NSCFConstantString, everything works
+ *     linked core-first (an ad-hoc probe)       class_getName = NULL, objc_retain SEGFAULTS
  *
- * WHAT IT COSTS, FOUR LAYERS UP: `objc_retain` on such a constant sends to a zeroed isa and SEGFAULTS, and the
- * path that reaches it is this library's own dictionary-key enumerator, used by `-[NSDictionary
- * isEqualToDictionary:]`:
+ * **SO THIS IS AN ORDER-SENSITIVITY AND NOT A LIVE DEFECT, AND IT IS RECORDED AS ONE.** Nothing in this tree links
+ * Core Foundation before Foundation, so no shipped path reaches the crash — AND EVERY MEASUREMENT THAT SAID
+ * OTHERWISE WAS TAKEN AGAINST AN AD-HOC PROBE WHOSE LINK LINE PUT CORE FOUNDATION FIRST. A data symbol bound early
+ * is simply bound; a weak definition yields to a strong one only while the lookup is still running.
  *
- *     CFEqual(dict, dict) -> -[NSDictionary isEqualToDictionary:]
- *       -> cf_imp_dictionary_key_enumerator -> cf_imp_snapshot_enumerator
- *         -> -[NSArray initWithArray:] -> objc_retain -> SIGSEGV
- *
- * THE TWO CANDIDATE FIXES, neither attempted here: give this storage the class at STARTUP rather than relying on
- * the link (`_NSCFConstantString` is a real class in libagora-base, so the fixup can be done once), or drop this
- * weak definition so that the strong one is the only one there is and a Core-Foundation-alone build learns that
- * the constant-string class is Foundation's to supply. Both need a test that a CFSTR is an OBJECT — dispatched
- * to, retained and compared — which this tree does not have. */
+ * THE FIX, IF THE ORDER-SENSITIVITY IS EVER WORTH REMOVING, is to give this storage its class at STARTUP rather
+ * than relying on the link — `_NSCFConstantString` is a real class in libagora-base — which makes the answer the
+ * same in either order. It is not done here because nothing reaches it, and the invariant it rests on now has a
+ * case in `libagora-base`'s `reg_cfstr`: that the constant's class has a NAME. */
 #if TARGET_RT_64_BIT
 __attribute__((weak)) int __CFConstantStringClassReference[24] = {0};
 #else
