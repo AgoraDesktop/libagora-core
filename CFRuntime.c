@@ -358,13 +358,14 @@ extern void *object_getClass(void *obj);
  * machinery as _CFIsObjC below, one pass over the registered types, and NO FOUNDATION METHOD NEEDED --
  * which matters because this translation unit is C and a message send is not available to it.
  *
- * A Core Foundation object returns _kCFRuntimeNotATypeID: it wears no class (see
- * _CFRuntimeCreateInstance), so object_getClass is NULL for it and no chain exists. */
+ * A Core Foundation object returns _kCFRuntimeNotATypeID: it may wear __NSCFType (see
+ * _CFRuntimeCreateInstance), whose chain reaches no bridge root, so no type id is claimed. */
 /* AGORA: IS THIS POINTER AN OBJECTIVE-C OBJECT AT ALL? Cheap, and it needs no type id -- which matters,
- * because CFRetain and CFRelease ask it on every call. A CORE FOUNDATION OBJECT WEARS NO CLASS (see
- * _CFRuntimeCreateInstance), so its _cfisa is 0 and object_getClass answers NULL; a Foundation object has
- * an isa, and a small object has tag bits the runtime decodes. Measured: kCFBooleanTrue's word 0 is 0
- * while its cfinfoa sits at word 1, so the two can never be confused for one another. */
+ * because CFRetain and CFRelease ask it on every call. A CORE FOUNDATION OBJECT WEARS A CF-OWNED CLASS
+ * (see _CFRuntimeCreateInstance) -- __NSCFType when its type has none of its own -- so it IS an object by
+ * this test; a Foundation object has an isa too, and a small object has tag bits the runtime decodes.
+ * The test says "has a named class", NOT "is Foundation's": _CFIsOwnedCFObject is the second question,
+ * and it is the one CFRetain and CFRelease act on. */
 /* THE CLASS CORE FOUNDATION MADE FOR ITSELF, per type id, alongside the class Foundation registered.
  * Two tables because the two questions are different ones: CF_IS_OBJC asks about Foundation's cluster,
  * _CFRuntimeCreateInstance asks what a Core Foundation object should wear. */
@@ -2563,6 +2564,71 @@ static uintptr_t cf_bridged_subclass(CFTypeID typeID, const void *cls_ref)
 	}
 	return (uintptr_t)sub;
 }
+
+/* AGORA: THE CLASS AN UNBRIDGED CORE FOUNDATION OBJECT WEARS, WHICH IS APPLE'S __NSCFType.
+ *
+ * cf_bridged_subclass gives a type a class only when Foundation hands one over. A type Foundation never
+ * bridges -- every CoreText font, every CoreGraphics color space, CFUUID, CFBitVector, CFTree -- therefore
+ * had isa == 0, and isa == 0 is not an object: libobjc2's objc_retain reads obj->isa before it decides
+ * whether to send -retain, so Foundation's -setObject:forKey: dereferenced NULL. MEASURED, and it is what
+ * this exists for: SIGSEGV in objc_test_class_flag <- objc_retain <- [NSDictionary setObject:forKey:],
+ * with a CTFontRef in hand.
+ *
+ * APPLE GIVES EVERY CF TYPE A CLASS, __NSCFType when the type has none of its own, and Core Foundation
+ * makes it here rather than Foundation because an unbridged object can be created before Foundation is
+ * loaded. It is a SUBCLASS OF NSObject when the runtime already has one, so it inherits -isEqual:, -hash,
+ * -class and the rest of the protocol Foundation sends an argument; WITHOUT NSObject IT IS NOT MADE AT ALL
+ * and the object keeps isa == 0 -- where nothing can reach it, because nothing messages a Core Foundation
+ * object until Foundation exists. NSObject's presence, not Foundation's, is the gate.
+ *
+ * ITS METHODS ARE cf_object_methods, THE SAME RETAIN FAMILY EVERY OWNED CLASS GETS. That is what makes
+ * objc_retain dispatch -retain into CFRetain instead of walking the word before the object -- libobjc2's
+ * own retain count, which over a CFRuntime allocation is the MALLOC CHUNK HEADER. And it is recorded in
+ * __CFRuntimeOwnedClasses for the same reason: CFRetain and CFRelease must take the CORE FOUNDATION path
+ * for anything wearing it.
+ *
+ * MADE ONCE, UNDER THE LOCK THAT GUARDS THE CLASS TABLES, AND ONLY AFTER NSObject EXISTS. The cheap
+ * objc_getClass("NSObject") before the lock means a call that arrives too early returns 0 WITHOUT caching
+ * a failure, so a later call -- after Foundation has loaded -- still makes the class. */
+static uintptr_t cf_generic_class_cache;
+
+static uintptr_t cf_generic_owned_class(void)
+{
+	if (cf_generic_class_cache == 0) {
+		os_unfair_lock_lock(&__CFBigRuntimeFunnel);
+		if (cf_generic_class_cache == 0) {
+			Class super = (Class)objc_getClass("NSObject");
+
+			if (super != NULL) {
+				Class cls = objc_allocateClassPair(super, "__NSCFType", 0);
+
+				if (cls != NULL) {
+					for (size_t i = 0; cf_object_methods[i].name != NULL; i++) {
+						class_addMethod(cls, sel_registerName(cf_object_methods[i].name),
+								cf_object_methods[i].imp, cf_object_methods[i].types);
+					}
+					objc_registerClassPair(cls);
+					if (__CFRuntimeOwnedClassCount < __CFRuntimeMaxOwnedClasses) {
+						__CFRuntimeOwnedClasses[__CFRuntimeOwnedClassCount++] = (uintptr_t)cls;
+					}
+					cf_generic_class_cache = (uintptr_t)cls;
+				}
+			}
+		}
+		os_unfair_lock_unlock(&__CFBigRuntimeFunnel);
+	}
+	return cf_generic_class_cache;
+}
+
+/* AGORA: IS THIS OBJECT WEARING THE GENERIC CLASS -- a Core Foundation object of a type Foundation never
+ * bridged? The generic class inherits ONLY NSObject's methods, so unlike a BRIDGED owned class (__NSCFString
+ * IS an NSString) it has no Foundation answer for -hash, -isEqual: or -_copyDescription. The doors below
+ * hand an object to Objective-C only when it does, which is what keeps CFHash, CFEqual and CFCopyDescription
+ * on Core Foundation's own callbacks for a CTFontDescriptor. */
+static Boolean cf_is_generic_object(const void *obj)
+{
+	return cf_generic_class_cache != 0 && (uintptr_t)object_getClass((void *)obj) == cf_generic_class_cache;
+}
 #endif
 
 Boolean _CFIsObjC(CFTypeID typeID, void *obj) {
@@ -2876,13 +2942,14 @@ CFTypeRef _CFRuntimeCreateInstance(CFAllocatorRef allocator, CFTypeID typeID, CF
      *   cluster root, so @[@1,@2] is recognised as a CFArray;
      *   this assignment asked "what class should CF's OWN object wear?" -- and the answer cannot be
      *   Foundation's, because Foundation's methods do not know CF's storage.
-     * Apple answers the second with a CF-owned class (__NSCFArray) whose methods ARE Core Foundation's.
-     * Agora has no such class, so a CF object wears none, which is what kCFBooleanTrue has always done
-     * and what CF_IS_OBJC already handles (a zero class is not an object). Foundation's objects keep
-     * their own isas and are still recognised, by the chain walk in _CFIsObjC. */
+     * Apple answers the second with a CF-owned class (__NSCFArray) whose methods ARE Core Foundation's,
+     * and Agora does too: cf_bridged_subclass makes it for a bridged type, and cf_generic_owned_class
+     * makes __NSCFType for every type Foundation never bridges. Foundation's objects keep their own isas
+     * and are still recognised, by the chain walk in _CFIsObjC. */
 #if defined(__OBJC__)
-    /* A CORE FOUNDATION OBJECT WEARS CORE FOUNDATION'S CLASS FOR ITS TYPE, or none when the type has not
-     * been bridged -- kCFBooleanTrue's isa has always been 0. */
+    /* A CORE FOUNDATION OBJECT WEARS CORE FOUNDATION'S CLASS FOR ITS TYPE, and __NSCFType when the type
+     * has no class of its own -- see cf_generic_owned_class, which is what an unbridged type (every
+     * CoreText font, every CoreGraphics color space) wears so that Foundation can hold one. */
     /* AND THE CATEGORY DECIDES WHICH OF THE TWO CLASSES THIS INSTANCE WEARS. The type id cannot: the two
      * halves share one, and the constructors that pass a category are the ones that made a mutable object.
      * A type with no mutable half ignores the category here. */
@@ -2890,6 +2957,11 @@ CFTypeRef _CFRuntimeCreateInstance(CFAllocatorRef allocator, CFTypeID typeID, CF
         memory->_cfisa = __CFRuntimeCFOwnMutableClassTable[typeID];
     } else {
         memory->_cfisa = __CFRuntimeCFOwnClassTable[typeID];
+    }
+    /* THE GENERIC CLASS IS THE FLOOR, NOT A SUBSTITUTE: it is used only when the type has no class of
+     * its own, so nothing that already had one changes class. */
+    if (memory->_cfisa == 0) {
+        memory->_cfisa = cf_generic_owned_class();
     }
 #else
     memory->_cfisa = 0;
@@ -2936,7 +3008,14 @@ void _CFRuntimeInitStaticInstance(void *ptr, CFTypeID typeID) {
         memory->_cfinfoa = (uint32_t)(typeIDMasked | usesDefaultAllocatorMasked);
     }
 #endif
+#if defined(__OBJC__)
+    /* AND A STATIC INSTANCE OF AN UNBRIDGED TYPE GETS THE GENERIC CLASS TOO. A BRIDGED one is written in
+     * afterwards by cf_bridged_subclass (__CFNullBindOwnedClass, __CFBooleanBindOwnedClass), which
+     * overwrites this; an unbridged one has nothing else to give it a class. */
+    memory->_cfisa = cf_generic_owned_class();
+#else
     memory->_cfisa = 0;
+#endif
     if (NULL != cfClass->init) {
        (cfClass->init)(memory);
     }
@@ -2983,11 +3062,17 @@ CF_PRIVATE void _CFRuntimeSetInstanceTypeIDAndIsaForCategory(CFTypeRef cf, CFTyp
      *
      * THE OWNED CLASS FOR THE NEW TYPE AND NOT __CFISAForTypeID, for the reason that whole table exists:
      * the bridge class is FOUNDATION's and would make a Core Foundation object wear it. Guarded on the
-     * object having NO class, so a Foundation object that is ever retyped keeps its own isa. */
-    if (_CFTypeGetClass(cf) == 0) {
-        ((CFRuntimeBase *)cf)->_cfisa = ((category != NULL && __CFRuntimeCFOwnMutableClassTable[newTypeID] != 0)
+     * object being CORE FOUNDATION'S OWN -- no class, or one of ours, which now includes __NSCFType --
+     * so a Foundation object that is ever retyped keeps its own isa. */
+    if (_CFTypeGetClass(cf) == 0 || _CFIsOwnedCFObject(cf)) {
+        uintptr_t own = ((category != NULL && __CFRuntimeCFOwnMutableClassTable[newTypeID] != 0)
 
              ? __CFRuntimeCFOwnMutableClassTable[newTypeID] : __CFRuntimeCFOwnClassTable[newTypeID]);
+
+        if (own == 0) {
+            own = cf_generic_owned_class();
+        }
+        ((CFRuntimeBase *)cf)->_cfisa = own;
     }
 #endif
 }
@@ -3008,9 +3093,15 @@ CF_PRIVATE void _CFRuntimeSetInstanceTypeIDAndIsa(CFTypeRef cf, CFTypeID newType
      *
      * THE OWNED CLASS FOR THE NEW TYPE AND NOT __CFISAForTypeID, for the reason that whole table exists:
      * the bridge class is FOUNDATION's and would make a Core Foundation object wear it. Guarded on the
-     * object having NO class, so a Foundation object that is ever retyped keeps its own isa. */
-    if (_CFTypeGetClass(cf) == 0) {
-        ((CFRuntimeBase *)cf)->_cfisa = __CFRuntimeCFOwnClassTable[newTypeID];
+     * object being CORE FOUNDATION'S OWN -- no class, or one of ours, which now includes __NSCFType --
+     * so a Foundation object that is ever retyped keeps its own isa. */
+    if (_CFTypeGetClass(cf) == 0 || _CFIsOwnedCFObject(cf)) {
+        uintptr_t own = __CFRuntimeCFOwnClassTable[newTypeID];
+
+        if (own == 0) {
+            own = cf_generic_owned_class();
+        }
+        ((CFRuntimeBase *)cf)->_cfisa = own;
     }
 #endif
 }
@@ -3083,12 +3174,12 @@ CF_PRIVATE void __CFGenericValidateType_(CFTypeRef cf, CFTypeID type, const char
     if (cf && CF_IS_SWIFT(type, (CFSwiftRef)cf)) return;
 #endif
     if (cf && CF_IS_OBJC(type, cf)) return;
-    /* AGORA: A BRIDGED OBJECT IS EXEMPT, AND BEFORE THE READ RATHER THAN AFTER IT. The
+    /* AGORA: A FOUNDATION OBJECT IS EXEMPT, AND BEFORE THE READ RATHER THAN AFTER IT. The
      * assertion below reads the type word at offset 0 -- the isa for a Foundation object,
-     * and for a tagged pointer not an address at all. The typed variant of this macro
-     * already returns early for a bridged object; this is the same exemption for the
-     * generic one, which is the door CFRetain, CFRelease and the other generic doors use. */
-    if (_CFIsAnObject(cf)) {
+     * and for a tagged pointer not an address at all. CORE FOUNDATION'S OWN OBJECTS ARE NOT
+     * EXEMPT any more: they wear a CF-owned class too (__NSCFType when their type has none),
+     * and _CFIsOwnedCFObject is what tells the two apart, exactly as CFRetain/CFRelease do. */
+    if (_CFIsAnObject(cf) && !_CFIsOwnedCFObject(cf)) {
         return;
     }
     CFAssert2((cf != NULL) && (NULL != __CFRuntimeClassTable[__CFGenericTypeID_inline(cf)]) && (_kCFRuntimeIDNotAType != __CFGenericTypeID_inline(cf)) && (_kCFRuntimeIDCFType != __CFGenericTypeID_inline(cf)), __kCFLogAssertion, "%s(): pointer %p is not a CF object", func, cf); \
@@ -3130,12 +3221,27 @@ CF_INLINE Boolean CFTYPE_IS_SWIFT(const void *obj) {
  * Objective-C instead, which is Apple's CFTYPE_OBJC_FUNCDISPATCH -- A MESSAGE SEND, WHICH IS WHY THIS
  * TRANSLATION UNIT IS COMPILED AS OBJECTIVE-C (see CMakeLists.txt).
  *
- * `sel` is a MESSAGE TAIL, not a selector: `_copyDescription`, `hash`, `isEqual:, cf1`. */
+ * `sel` is a MESSAGE TAIL, not a selector: `_copyDescription`, `hash`, `isEqual:, cf1`.
+ *
+ * AND IT IS THE GENERIC CLASS THE DOORS WITHHOLD, NOT EVERY CLASS OF OURS. `_CFIsAnObject` alone answered
+ * "has a named class", which was enough only while a Core Foundation object wore no class at all. Now an
+ * unbridged one wears __NSCFType (see cf_generic_owned_class) and inherits ONLY NSObject's methods, so a
+ * door that handed it over would hand a CTFontDescriptor to -isEqual: and bypass CF's own equal callback.
+ * MEASURED, and it is what this exclusion exists for: CTFontMatchingCopyAvailableDescriptors dedups faces
+ * by CFEqual, and with the dispatch in place it collapsed FOUR faces to ONE -- so
+ * CTFontCreateCopyWithSymbolicTraits found no bold face and every emphasized UI font answered NULL.
+ *
+ * A BRIDGED OWNED CLASS IS NOT WITHHELD, AND THAT IS DELIBERATE: __NSCFString IS an NSString, so its
+ * -hash and -isEqual: ARE Foundation's and CFHash/CFEqual must reach them. MEASURED, AND THE TWO DO NOT
+ * AGREE HERE: CFHash on a CF string answers 37884933194 while Foundation's -hash answers
+ * 6298719171094792763, so withholding a bridged owned class would break the toll-free agreement that
+ * `reg_equality` asserts. Apple withholds EVERY Core Foundation object because Apple's two hashes agree;
+ * Agora's do not, and this dispatch is what holds the bridge together until they do. */
 #if defined(__OBJC__)
 #define CFTYPE_OBJC_FUNCDISPATCH0(rettype, obj, sel) \
-    do { if (_CFIsAnObject(obj)) return (rettype)[(id)(obj) sel]; } while (0)
+    do { if (_CFIsAnObject(obj) && !cf_is_generic_object(obj)) return (rettype)[(id)(obj) sel]; } while (0)
 #define CFTYPE_OBJC_FUNCDISPATCH1(rettype, obj, sel, a1) \
-    do { if (_CFIsAnObject(obj)) return (rettype)[(id)(obj) sel (a1)]; } while (0)
+    do { if (_CFIsAnObject(obj) && !cf_is_generic_object(obj)) return (rettype)[(id)(obj) sel (a1)]; } while (0)
 #else
 #define CFTYPE_OBJC_FUNCDISPATCH0(rettype, obj, sel) do {} while (0)
 #define CFTYPE_OBJC_FUNCDISPATCH1(rettype, obj, sel, a1) do {} while (0)
