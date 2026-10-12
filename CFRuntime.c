@@ -2656,7 +2656,28 @@ Boolean _CFIsObjC(CFTypeID typeID, void *obj) {
         return false;
     }
 #endif
-    for (cls = (uintptr_t)object_getClass(obj); cls != 0; cls = (uintptr_t)class_getSuperclass((void *)cls)) {
+    /* **AND THE WALK NEEDS THE GUARD `_CFIsAnObject` ALREADY HAS, WHICH IT DID NOT HAVE.** `object_getClass`
+     * answers A POINTER for anything with an isa — a bare `CFSTR`'s isa is clang's zeroed placeholder storage —
+     * and `class_getSuperclass` on that is not a no-op: MEASURED, it SEGFAULTS IN `objc_resolve_class`. That is
+     * the shape of the whole defect, and it is the reason this file's other door exists in the shape it does:
+     * this function is asked WHETHER AN OBJECT IS OBJECTIVE-C'S and it asks the runtime about an object the
+     * runtime does not own.
+     *
+     *     #0 objc_resolve_class                              libobjc
+     *     #1 class_getSuperclass                             libobjc
+     *     #2 _CFIsObjC                                       libagora-core   <- here
+     *     #3 _CFStrGetSpecialCaseHandlingLanguageIdentifierForLocale
+     *     #4 CFStringCompareWithOptionsAndLocale             libagora-core
+     *     #5 ct_match_compare                                libagora-text   (the family-name sort)
+     *
+     * `class_getName` IS SAFE ON SUCH A POINTER AND ANSWERS NULL — `_CFIsAnObject`'s own comment records that
+     * measurement, and it is why that function is written this way. So the walk starts only from a class the
+     * runtime knows, and an object whose isa the runtime does not know is simply not an object. */
+    cls = (uintptr_t)object_getClass(obj);
+    if (cls == 0 || class_getName((void *)cls) == NULL) {
+        return false;
+    }
+    for (; cls != 0; cls = (uintptr_t)class_getSuperclass((void *)cls)) {
         if (cls == want) {
             return true;
         }
