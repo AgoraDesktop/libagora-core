@@ -2627,7 +2627,35 @@ static uintptr_t cf_generic_owned_class(void)
  * on Core Foundation's own callbacks for a CTFontDescriptor. */
 static Boolean cf_is_generic_object(const void *obj)
 {
-	return cf_generic_class_cache != 0 && (uintptr_t)object_getClass((void *)obj) == cf_generic_class_cache;
+	Class cls = object_getClass((void *)obj);
+
+	if (cls == Nil) {
+		return false;
+	}
+	if (cf_generic_class_cache != 0 && (uintptr_t)cls == cf_generic_class_cache) {
+		return true;
+	}
+	/* **AND THE CACHE IS NOT THE WHOLE ANSWER, WHICH IS THE DEFECT THIS FIXES.** `cf_generic_class_cache` is 0
+	 * until something has had a reason to CREATE the generic class, and `CFEqual` can reach a generic object
+	 * before that has happened. MEASURED, with Foundation loaded: two `CTFontDescriptor`s with DIFFERENT families
+	 * compared EQUAL, because this answered false, the withholding in the dispatch macros did not apply, and
+	 * `CFEqual` asked `-[__NSCFType isEqual:]` instead of comparing the two descriptors itself. THE EFFECT WAS NOT
+	 * COSMETIC: `ct_match_add` deduplicates the font registry with `CFEqual`, so 118 faces became ONE, the role
+	 * matcher found no regular face, and `+[NSFont systemFontOfSize:]` answered nil — a menu with no text, four
+	 * layers above this line.
+	 *
+	 * THE CLASS'S OWN NAME IS THE FALLBACK, and it is a measurement rather than a guess: the runtime reports
+	 * `__NSCFType` for these objects, which is the class this file gives a type that has none of its own.
+	 *
+	 * **THIS WAS TRIED ONCE BEFORE AND SEGFAULTED, AND THE SEGFAULT WAS NOT THIS CHANGE.** The stack then was
+	 * never captured; the one that WAS captured later belonged to `_CFIsObjC`, which walked a class chain it had
+	 * not established was one — `class_getSuperclass` on a bare `CFSTR`'s zeroed placeholder isa. That guard is in
+	 * place now, and this is the retry. */
+	{
+		const char *name = class_getName(cls);
+
+		return name != NULL && strcmp(name, "__NSCFType") == 0;
+	}
 }
 #endif
 
