@@ -313,11 +313,30 @@ CFIndex CFAttributedStringGetLength(CFAttributedStringRef attrStr) {
     return CFStringGetLength(attrStr->string);
 }
 
+/* **AND THE ASSERT IS NOT A GUARD, SO THE BOUNDS ARE CHECKED FOR REAL.** `__CFAssertIndexIsInBounds` is a DIAGNOSTIC
+ * — it logs in a build that kept its assertions and says nothing in one that did not — and the lookup it guards used to
+ * read the run list's uninitialised first slot when the string had no characters at all. AN INDEX WITH NO CHARACTER
+ * UNDER IT HAS NO ATTRIBUTES, which is what NULL says, and it is the answer the layer above already documents it
+ * expects: `CTLineCreateWithAttributedString` answers NULL for a zero-length string precisely because "there is no
+ * character to carry the attribute, so there is no font to be found".
+ *
+ * THE EFFECTIVE RANGE IS SET EVEN IN THE REFUSAL, so a caller that asked "and how far does this run?" is told
+ * "nowhere, from here" rather than left holding whatever it passed in. */
+static Boolean fn_location_has_attributes(CFAttributedStringRef attrStr, CFIndex loc, CFRange *effectiveRange) {
+    if (loc >= 0 && loc < CFStringGetLength(attrStr->string)) return true;
+    if (effectiveRange) {
+        effectiveRange->location = (loc < 0) ? 0 : loc;
+        effectiveRange->length = 0;
+    }
+    return false;
+}
+
 CFDictionaryRef CFAttributedStringGetAttributes(CFAttributedStringRef attrStr, CFIndex loc, CFRange *effectiveRange) {
     CF_OBJC_FUNCDISPATCHV(CFAttributedStringGetTypeID(), CFDictionaryRef, (NSAttributedString *)attrStr, attributesAtIndex:(NSUInteger)loc effectiveRange:(NSRange *)effectiveRange);
     __CFAssertIsAttributedString(attrStr);
     __CFAssertIndexIsInBounds(attrStr, loc);
-    
+    if (!fn_location_has_attributes(attrStr, loc, effectiveRange)) return NULL;
+
     return (CFDictionaryRef)CFRunArrayGetValueAtIndex(attrStr->attributeArray, loc, effectiveRange, NULL);
 }
 
@@ -325,6 +344,7 @@ CFTypeRef CFAttributedStringGetAttribute(CFAttributedStringRef attrStr, CFIndex 
     CF_OBJC_FUNCDISPATCHV(CFAttributedStringGetTypeID(), CFTypeRef, (NSAttributedString *)attrStr, attribute:(NSString *)attrName atIndex:(NSUInteger)loc effectiveRange:(NSRange *)effectiveRange);
     __CFAssertIsAttributedString(attrStr);
     __CFAssertIndexIsInBounds(attrStr, loc);
+    if (!fn_location_has_attributes(attrStr, loc, effectiveRange)) return NULL;
 
     CFDictionaryRef attrs = (CFDictionaryRef)CFRunArrayGetValueAtIndex(attrStr->attributeArray, loc, effectiveRange, NULL);
     return CFDictionaryGetValue(attrs, attrName);

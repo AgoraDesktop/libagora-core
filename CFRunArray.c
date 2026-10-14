@@ -205,7 +205,22 @@ CFIndex CFRunArrayGetCount(CFRunArrayRef array) {
 }
 
 CFTypeRef CFRunArrayGetValueAtIndex(CFRunArrayRef array, CFIndex loc, CFRange *effectiveRange, CFIndex *blockIndexPtr) {
-    // ??? if (loc >= array->guts->length) BoundsError;
+    /* **AN OUT-OF-RANGE LOCATION ANSWERS NULL, WHICH IS THE CHECK THIS FUNCTION USED TO ONLY WISH FOR.** This line
+     * used to read `// ??? if (loc >= array->guts->length) BoundsError;` — a comment — and what it wondered about is
+     * REACHABLE: `CFAttributedStringGetAttribute` asks for index 0 of an EMPTY run array, which is what every
+     * zero-length attributed string has (an empty document, a control whose title is `@""`), `blockForLocation`
+     * answers 0 for a run list with no blocks, and `list[0].obj` then reads the UNINITIALISED first slot. MEASURED:
+     * `[@"" sizeWithAttributes:]` segfaulted inside `CFBasicHashFindBucket`, because the garbage slot happened to
+     * look enough like a dictionary to get past the type check and was used as one.
+     *
+     * ITS SIBLING BELOW ALREADY ANSWERS NULL for a run index past the end (`CFRunArrayGetValueAtRunArrayIndex`), so
+     * this is that rule applied to a LOCATION rather than a new one. The block index is set to -1 for the same reason
+     * it exists at all: there is no block, and a caller that asked which one should not be handed a stale number. */
+    if (loc < 0 || loc >= array->guts->length) {
+        if (effectiveRange) *effectiveRange = CFRangeMake(loc, 0);
+        if (blockIndexPtr) *blockIndexPtr = -1;
+        return NULL;
+    }
     CFIndex blockIndex = blockForLocation(array->guts, loc, effectiveRange);
     if (blockIndexPtr) *blockIndexPtr = blockIndex;
     return array->guts->list[blockIndex].obj;
