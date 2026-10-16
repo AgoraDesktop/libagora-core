@@ -181,6 +181,7 @@ add_library(CoreFoundation SHARED
     CFDictionary.c
     CFError.c
     CFFileUtilities.c
+    CFHyphenation.c
     CFICUConverters.c
     CFKnownLocations.c
     CFListFormatter.c

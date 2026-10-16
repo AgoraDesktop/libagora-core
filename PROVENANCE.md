@@ -100,6 +100,20 @@ Verified: `libagora-core.a` builds with clang (0 warnings); a CFString / CFArray
 smoke test links and runs; and a standalone consumer project using `find_package(CoreFoundation CONFIG)`
 against an installed prefix configures, links and runs.
 
+### `CFHyphenation.c`, which upstream does not have here
+
+`CFString.h` declares `CFStringGetHyphenationLocationBeforeIndex` and
+`CFStringIsHyphenationAvailableForLocale`, and nothing in this repository defined them — Apple's
+implementation lives outside the source set this tree was extracted from. **Agora's `CFHyphenation.c` is
+a new file rather than a change to an upstream one**, and it is the ONLY file in this component whose
+content is not traced to the extraction above. It implements Liang's algorithm over the hyphenation
+dictionaries a Linux system carries, which are read from `/usr/share/hyphen` at RUNTIME and deliberately
+not vendored: `hyphen-en-us`'s Debian copyright states the patterns are `GPL-2+ or LGPL-2.1+ or
+MPL-1.1+`, which cannot be copied into this MIT-licensed tree. Apple's own header makes the absent case
+part of the contract — "Hyphenation data is not available for all locales" — so a locale with no
+dictionary on the machine answers FALSE rather than guessing. The file's own header records the
+algorithm, the measurements, and the one dictionary family whose intent this tier could not settle.
+
 ## Licence and attribution
 
 The extracted code is Apache-2.0 with the Runtime Library Exception. `LICENSE` is retained verbatim
