@@ -100,6 +100,19 @@ Verified: `libagora-core.a` builds with clang (0 warnings); a CFString / CFArray
 smoke test links and runs; and a standalone consumer project using `find_package(CoreFoundation CONFIG)`
 against an installed prefix configures, links and runs.
 
+### `CFBundle_Resources.c`: the executables subdirectory name
+
+`_CFBundleGetPlatformExecutablesSubdirectoryName()` answered the **HOST's** name — `Linux` on Linux, `FreeBSD`
+on the BSDs — so `CFBundleCopyExecutableURL` searched `Contents/Linux` and answered NULL for every modern
+`.app`. Agora's bundles use **Apple's layout**, so a `.app`'s executable is in `Contents/MacOS` on every platform
+Agora targets, and that function now answers `MacOS` there.
+
+MEASURED, and it is how the line was found: before the change `CFBundleCopyExecutableURL` returned NULL for the
+real `Workspace.app`; after it, `…/Workspace.app/Contents/MacOS/Workspace`. `_CFBundleGetCurrentPlatform()`, which
+names the OS rather than a directory, is deliberately left at the host's answer. The alternative — resolving the
+executable in the consumer (`libagora-launchservices`) — was built first and then removed in favour of fixing it
+at the source.
+
 ### `CFHyphenation.c`, which upstream does not have here
 
 `CFString.h` declares `CFStringGetHyphenationLocationBeforeIndex` and

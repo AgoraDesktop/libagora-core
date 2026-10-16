@@ -527,10 +527,16 @@ CF_PRIVATE CFStringRef _CFBundleGetPlatformExecutablesSubdirectoryName(void) {
 #if TARGET_OS_CYGWIN
     return CFSTR("Cygwin");
 #else
-    return CFSTR("Linux");
+    /* **AGORA'S BUNDLES USE APPLE'S LAYOUT, SO THE EXECUTABLES SUBDIRECTORY IS `MacOS` HERE.** The upstream
+     * answer is `Linux`, which names the GNUstep-style layout (`Contents/Linux/<arch>`) that THIS tree does not
+     * build; every Agora application — `Workspace.app` included — puts its executable in `Contents/MacOS`, and
+     * with `Linux` here `CFBundleCopyExecutableURL` answered NULL for EVERY one of them. MEASURED, and it is how
+     * this line was found. */
+    return CFSTR("MacOS");
 #endif
 #elif TARGET_OS_BSD
-    return CFSTR("FreeBSD");
+    /* The same answer on the BSDs, for the same reason: the layout is Apple's, not the host's. */
+    return CFSTR("MacOS");
 #elif TARGET_OS_WASI
     return CFSTR("WASI");
 #else
