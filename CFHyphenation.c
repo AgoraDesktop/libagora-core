@@ -723,6 +723,7 @@ CFIndex CFStringGetHyphenationLocationBeforeIndex(CFStringRef string, CFIndex lo
 		CFIndex absolute[AG_HYPHEN_MAX_WORD];
 		CFIndex soft[AG_HYPHEN_MAX_WORD];
 		CFIndex collectedCount = 0, softCount = 0;
+		CFIndex ceiling;
 		const UniChar *patternWord = NULL;
 		CFIndex k;
 
@@ -775,10 +776,21 @@ CFIndex CFStringGetHyphenationLocationBeforeIndex(CFStringRef string, CFIndex lo
 				CFRelease(raw);
 			}
 		}
-		/* **THE SHORTEST WORD THAT CAN CARRY A DICTIONARY BREAK IS `lhmin + rhmin` CHARACTERS**, and the test is
+		/* **`limitRange` IS THE RANGE THE ANSWER MUST LIE IN, AND THAT MEANS BOTH OF ITS ENDS.** Apple calls it
+		 * "the range of characters within the string to search" and draws the consequence itself — "the range may
+		 * be empty (length 0), in which case no hyphen location is generated" — which only follows if the answer
+		 * has to be INSIDE the range. So the ceiling is the range's end and `location`, whichever is nearer;
+		 * treating `limitRange` as a floor alone answers with a break the caller EXCLUDED, which is what
+		 * `libagora-base/tests/linguistic_units.m` caught by being told about a break at 6 by a range ending at 6.
+		 *
+		 * THE SHORTEST WORD THAT CAN CARRY A DICTIONARY BREAK IS `lhmin + rhmin` CHARACTERS**, and the test is
 		 * strict: at exactly that length there is ONE break — the en_US minima of 2 and 3 make a five-character
 		 * word breakable in the middle and nowhere else — so "table" answers 2 (ta-ble) and "zebra" answers 2
 		 * (ze-bra), while a four-character word answers nothing. */
+		ceiling = limitRange.location + limitRange.length;
+		if (ceiling > location) {
+			ceiling = location;
+		}
 		if (collectedCount >= dictionary->lhmin + dictionary->rhmin) {
 			priorities = (uint8_t *)malloc((size_t)(collectedCount + 3));
 			if (priorities != NULL) {
@@ -789,7 +801,7 @@ CFIndex CFStringGetHyphenationLocationBeforeIndex(CFStringRef string, CFIndex lo
 				for (k = collectedCount - dictionary->rhmin; k >= dictionary->lhmin; k--) {
 					CFIndex candidate = absolute[k];
 
-					if (candidate >= location) {
+					if (candidate >= ceiling) {
 						continue;
 					}
 					if (candidate < limitRange.location) {
@@ -809,7 +821,7 @@ CFIndex CFStringGetHyphenationLocationBeforeIndex(CFStringRef string, CFIndex lo
 		 * it. The break is recorded BEFORE the soft hyphen, which is the index a caller inserts a visible hyphen
 		 * at, and the search is still "the last one before `location`". */
 		for (k = 0; k < softCount; k++) {
-			if (soft[k] < location && soft[k] >= limitRange.location && soft[k] > answer) {
+			if (soft[k] < ceiling && soft[k] >= limitRange.location && soft[k] > answer) {
 				answer = soft[k];
 			}
 		}
