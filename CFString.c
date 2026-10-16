@@ -35,6 +35,13 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
+
+#if defined(__OBJC__)
+/* **`objc_msgSend`, FOR THE ONE SEND THAT MUST NOT CARRY A TYPE.** `CFStringCreateWithSubstring`'s bridged
+ * dispatch is sent untyped to keep libobjc2 from registering the selector with this file's COMPLETE
+ * `struct __CFString`; see the call and `CFBridgedMethods.h`'s audit. */
+#include <objc/message.h>
+#endif
 #if TARGET_OS_MAC || TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASI
 #include <unistd.h>
 #endif
@@ -1732,7 +1739,21 @@ CFStringRef CFStringCreateWithSubstring(CFAllocatorRef alloc, CFStringRef str, C
 /* AGORA: RESTORED FROM THE COMMENT ABOVE, the same way CFCopyDescription's was. A commented-out
      * dispatch is a door that silently reads Core Foundation's storage out of a Foundation object:
      * measured as SIGSEGV on CFStringCreateWithSubstring from an NSString. */
-    CF_OBJC_FUNCDISPATCHV(_kCFRuntimeIDCFString, CFStringRef, (NSString *)str, _createSubstringWithRange:NSMakeRange(range.location, range.length));
+    /* **AND IT IS SENT UNTYPED, WHICH IS WHAT SILENCES libobjc2'S `incorrect signature` REPORT.** This
+     * translation unit has `CFString.h`'s COMPLETE `struct __CFString` in scope, so a typed send registers the
+     * selector with the complete struct, while libagora-base's method — which sees only the opaque
+     * `typedef` — is `^{__CFString=}`; libobjc2 compares the two and prints the report for every call. An object
+     * pointer is one register whichever way its pointee is spelled, so nothing about the CALL changes — only
+     * the selector's registered TYPE, and an untyped send leaves that to the method. MEASURED: the report
+     * (`Calling [NSOwnedString -_createSubstringWithRange:] with incorrect signature`) is gone, and
+     * `CFStringCreateWithSubstring` on an NSString still answers the substring. See `CFBridgedMethods.h`'s
+     * audit, which records the report as pointer-only and ABI-identical. */
+    if (CF_IS_OBJC(_kCFRuntimeIDCFString, str)) {
+        typedef CFStringRef (*AgoraSubstringFunction)(id, SEL, NSRange);
+
+        return ((AgoraSubstringFunction)objc_msgSend)((id)str, @selector(_createSubstringWithRange:),
+                                                      NSMakeRange(range.location, range.length));
+    }
 
     __CFAssertIsString(str);
     __CFAssertRangeIsInStringBounds(str, range.location, range.length);

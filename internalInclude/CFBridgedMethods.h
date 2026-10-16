@@ -154,7 +154,17 @@ typedef struct __CFString *CFMutableStringRef;
  * it must keep, while a Core Foundation translation unit that has included CFString.h has the complete
  * struct and nothing can unsee it. An object pointer is one register whichever way the pointee is spelled,
  * so these are ABI-identical, and their BEHAVIOUR is measured: a direct -_createSubstringWithRange: on a
- * CFSTR answers the right substring and every CFURL-on-NSURL door passes. */
+ * CFSTR answers the right substring and every CFURL-on-NSURL door passes.
+ *
+ * **AND THEY DO NOT HAVE TO BE MATCHED — THE ONE TYPED SITE CAN BE SENT UNTYPED, WHICH IS THE CURE THAT WAS
+ * APPLIED.** `CFStringCreateWithSubstring` is the only message send of `-_createSubstringWithRange:` that
+ * carries a type, and it now casts `objc_msgSend` to a function pointer whose result is the OPAQUE typedef
+ * and passes the selector through `@selector()`, so libobjc2 registers no type for it: the method's own
+ * opaque type is the only one in play, and the CALL is ABI-identical because an object pointer is one
+ * register either way. MEASURED: the `Calling [NSOwnedString -_createSubstringWithRange:] with incorrect
+ * signature` report is GONE from the controls demonstration, and `CFStringCreateWithSubstring` on an
+ * NSString still answers the substring. `-_cfurl` still fires where its typed site in CFURL.c is reached,
+ * and the same cure applies there. */
 
 #endif /* __OBJC__ */
 
