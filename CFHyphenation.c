@@ -19,6 +19,11 @@
 	note stays TRUE of the typesetter: Core Text's typesetter does not hyphenate either, and this file does not
 	make it.)
 
+	HOW THE TWO ORACLE MEASUREMENTS BELOW ARE REPRODUCED, so that a reader can repeat them rather than trust
+	them: `python3 -m venv /tmp/h && /tmp/h/bin/pip install pyphen` (0.18.1), then `Pyphen(filename=
+	"/usr/share/hyphen/hyph_en_US.dic")` for the same-dictionary differential and `Pyphen(lang="en_US")` for the
+	bundled one. Nothing in this library depends on pyphen; it is an ORACLE, which is what the differential is for.
+
 	THE DATA IS READ FROM THE SYSTEM AT RUNTIME AND IS NOT VENDORED, AND THAT IS THE DECISION THIS FILE
 	RECORDS. The dictionary on a Debian machine is `/usr/share/hyphen/hyph_<lang>_<REGION>.dic`, and
 	`hyphen-en-us`'s own copyright file states the license of the en_US patterns:
@@ -47,19 +52,32 @@
 	(in-ter-na-tion-al-i-za-tion), "typography" at 2, 5 and 7, "algorithm" at 2 and 4, "table" at 2, and
 	"computer" at 3 ALONE — the last because `RIGHTHYPHENMIN 3` forbids the "comput|er" break that would
 	leave only two characters, which is the file's own minimum doing its job rather than a missing pattern.
+	**AND 26 OF THOSE WORDS ARE ASSERTED IN `libagora-base`'s BRIDGE SUITE**, including the three the `ad`
+	family derives nothing for.
 
-	ONE FAMILY OF PATTERNS IS RECORDED RATHER THAN EXPLAINED, AND IT IS MEASURED. The en_US dictionary's
-	doubled-consonant idiom is a descending triple — "matter" is covered by `.ma4t3t2`, which forbids
-	"ma|tter" with 4, ALLOWS "mat|ter" with 3, and forbids "matt|er" with 2 — and that idiom is what this
-	implementation reproduces. But the `ad` family contradicts itself under the maximum rule:
-	`.ad1d4`/`ad1d4`/`d1d4` put 1 at the "ad|d" gap and 4 at the "add|" gap, while `ad4d1in` puts 4 at "ad|d"
-	and 1 at "add|i". The maximum therefore FORBIDS both gaps, so this file derives NO hyphenation for
-	"adder", "adding" or "added" — words every English dictionary breaks "ad-der", "add-ing", "add-ed". That
-	disagreement is in the DATA and not in the algorithm (28 of 32 hand-checked words, including every long
-	one, come out exactly right), no independent implementation was available on this machine to settle it
-	(`libhyphen.so.0` is installed but its exported `hnj_hyphen_hyphenate` answers "no hyphens" for every
-	word, including for a dictionary written by hand where the answer is known), and this tree's rule is that
-	a guess is not written down as if it were a fact. So the three words are named here and asserted NOWHERE.
+	THE `ad` FAMILY LOOKED LIKE A DISAGREEMENT AND IS NOT ONE, AND WHAT SETTLED IT IS AN INDEPENDENT
+	IMPLEMENTATION RATHER THAN AN ARGUMENT. The en_US dictionary's doubled-consonant idiom is a descending
+	triple — "matter" is covered by `.ma4t3t2`, which forbids "ma|tter" with 4, ALLOWS "mat|ter" with 3, and
+	forbids "matt|er" with 2 — and that idiom is what this implementation reproduces. The `ad` family looks
+	like it contradicts itself: `.ad1d4`/`ad1d4`/`d1d4` put 1 at the "ad|d" gap and 4 at the "add|" gap, while
+	`ad4d1in` puts 4 at "ad|d" and 1 at "add|i", so the maximum FORBIDS both gaps — and this file therefore
+	derives NO hyphenation for "adder", "adding" or "added", which every English dictionary breaks.
+	**MEASURED: `pyphen` 0.18.1, an independent implementation of Liang over the SAME dictionary file, answers
+	the same three words the same way — [] for all three — and so does the SAME implementation over pyphen's
+	OWN bundled copy of the en_US patterns, which is a different file of a different size (106414 bytes against
+	Debian's 106063). So the three words are the DATA's answer and not this file's mistake, and the case that
+	asserts the twenty-two other words asserts these three as well. What the pattern set does hyphenate is
+	`address` → "ad-dress", so the family is not uniformly unbroken.
+
+	AND THE SAME ORACLE CONFIRMED THE ALGORITHM ITSELF, WITH ONE DIFFERENCE THAT IS WORTH STATING. Over 4,000
+	words sampled from `en_US.dic`, this file's Liang and pyphen's agree on **every one of them** when both use
+	the same minima — and they disagreed on **671** before that, every single disagreement being a position
+	pyphen allows and this file forbids because **pyphen does not read `RIGHTHYPHENMIN`**: it recognises the
+	directive's NAME in order to skip it and takes its minimum from its own constructor default of 2. The
+	dictionary states 3, the format exists so that it can be stated, and `libhyphen` reads it — so obeying the
+	file is the right reading and "computer" breaking at 3 ALONE (rather than pyphen's 3 and 6) is that reading
+	showing. A differential test that had not checked the minima first would have "found" 671 bugs in a
+	correct implementation.
 */
 #include "CFBase.h"
 #include "CFString.h"
