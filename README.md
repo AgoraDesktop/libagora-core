@@ -7,6 +7,14 @@ rest of the Core Foundation surface that Foundation is built on.
 Agora is an installable desktop environment for Linux and BSD; see the project README in the parent
 directory (`../README.md`). `libagora-core` is the bottom layer of its stack.
 
+
+**AND NORMALIZATION IS NOW MEASURED AGAINST UNICODE'S OWN SUITE.** `CFStringNormalize` had existed here with nothing
+ever asking it a conformance case; `libagora-base/tests/normalization.c` now runs the nine-case curated table from
+`NormalizationTest.txt` on every build and the whole 19,074-case file whenever `NORM_TEST` names the download.
+**19,074 of 19,074 satisfy all six invariants** — after the run found one rule missing: Hangul composition is
+arithmetic, not table lookup, and only the L + V half was implemented, so `1100 AC00 11A8` failed to compose its
+trailing jamo. See `PROVENANCE.md` for the record and `CFStringNormalize` for the note beside the fix.
+
 ## Provenance
 
 The C sources here are extracted from Apple's

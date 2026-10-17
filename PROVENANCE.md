@@ -138,3 +138,23 @@ under the project licence (see the top-level project README).
 Updates re-extract from a newer upstream revision and record it in the table above. Because the tree
 sits at the repository root, `git diff` against a fresh upstream checkout shows local divergence
 directly.
+
+## NORMALIZATION: Unicode's own test suite, and what it found
+
+`libagora-base/tests/normalization.c` is the first suite in this tree that asks `CFStringNormalize` anything, and it
+is a CONFORMANCE run before it is an example set.
+
+- **THE DATA IS `NormalizationTest.txt`** (Unicode 15.1.0, 2.6 MB, 19,074 cases), each case five columns — source,
+  NFC, NFD, NFKC, NFKD — with SIX invariants that every conformant implementation must satisfy. **IT IS NOT IN THIS
+  REPOSITORY**, the same standing every other UCD file has: what is committed is `libagora-base/tools/gen-normalization-
+  cases.py` (the recipe, with the URL) and the nine-case curated table it produces — the shortest case the data has for
+  each construct the normalizer has a separate code path for.
+- **THE SCORE IS 19,074 OF 19,074** — every case, every invariant. The committed table runs on every build (189
+  checks); pointing `NORM_TEST` at the download runs the whole file, and the case ASSERTS the count, so a regression
+  and an unrecorded improvement both fail.
+- **AND IT FOUND ONE RULE MISSING, which is the argument for conformance data in one line.** Hangul composition
+  (UAX #15 §3.12) is ARITHMETIC, not table lookup: L + V makes an LV syllable, LV + T makes an LVT one. Only the first
+  half was implemented, so a leading jamo, an LV syllable and a trailing jamo normalized to itself instead of composing
+  the final consonant — the trailing jamo fell through to the canonical table, which has no Hangul entries, got
+  `0xFFFD` back and stayed a separate character. TWO OF THE 19,074 CASES, both that rule. Nothing in the tree had ever
+  written that sequence.

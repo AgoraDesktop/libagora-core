@@ -5786,6 +5786,18 @@ CF_INLINE void __CFFillInUTF16(const UTF32Char *characters, UTF16Char *dst, uint
     }
 }
 
+/* **MEASURED AGAINST UNICODE'S OWN CASES: 19,074 OF 19,074.** `NormalizationTest.txt` (Unicode 15.1.0) states five
+ * columns per case — source, NFC, NFD, NFKC, NFKD — with six invariants that every conformant implementation must
+ * satisfy, and `libagora-base/tests/normalization.c` runs all of them: 189 checks over a committed table of nine
+ * curated cases on every build, and the whole file whenever `NORM_TEST` names the download. The suite asserts the
+ * count, so a regression and an unrecorded improvement both fail.
+ *
+ * **AND THE RUN FOUND ONE RULE MISSING, WHICH IS WHY IT EXISTS.** Hangul composition in UAX #15 §3.12 is
+ * ARITHMETIC rather than table lookup: L + V makes an LV syllable and LV + T makes an LVT one. Only the first half
+ * was here, so `1100 AC00 11A8` — a leading jamo, an LV syllable and a trailing jamo — normalized to itself instead
+ * of to `1100 AC01`: the trailing jamo fell through to the canonical table, which has no Hangul entries, and stayed
+ * separate. TWO OF THE 19,074 CASES, both that rule; the branch is marked where it is.
+ */
 void CFStringNormalize(CFMutableStringRef string, CFStringNormalizationForm theForm) {
     CFIndex currentIndex = 0;
     CFIndex length;
@@ -6042,6 +6054,23 @@ void CFStringNormalize(CFMutableStringRef string, CFStringNormalizationForm theF
                                 }
                             }
                             *mappedCharacters = (lIndex * HANGUL_VCOUNT + vIndex) * HANGUL_TCOUNT + tIndex + HANGUL_SBASE;
+                            mappedLength = 1;
+                        }
+                    }
+                } else if ((currentChar >= HANGUL_SBASE) && (currentChar < (HANGUL_SBASE + HANGUL_SCOUNT)) && !_CFStringIsHangulLVT(currentChar)) { // Hangul Syllable LV: the OTHER half of the algorithmic composition
+                    /* **LV + T, WHICH THE CANONICAL TABLE CANNOT ANSWER BECAUSE HANGUL COMPOSITION IS ALGORITHMIC.** UAX #15
+                     * §3.12 composes Hangul by arithmetic rather than by table: L + V makes an LV syllable and LV + T makes
+                     * an LVT one. The branch above is the first half — raw L, then raw V, then an optional raw T — and this
+                     * is the second, where the LV is already a SYLLABLE. MEASURED, and it is the whole of what Unicode's
+                     * `NormalizationTest.txt` still found here: `1100 AC00 11A8` must normalize to `1100 AC01`, and without
+                     * this branch the trailing jamo fell through to the general path, asked a table that has no Hangul
+                     * entries, got 0xFFFD back and stayed a separate character. TWO OF 19,074 CASES, both this rule. */
+                    if (contents < limit) {
+                        SInt16 tIndex = *contents - HANGUL_TBASE;
+
+                        if ((tIndex > 0) && (tIndex < HANGUL_TCOUNT)) {
+                            ++contents; ++currentLength;
+                            *mappedCharacters = currentChar + tIndex;
                             mappedLength = 1;
                         }
                     }
