@@ -544,6 +544,117 @@ CF_PRIVATE CFStringRef _CFBundleGetPlatformExecutablesSubdirectoryName(void) {
 #endif
 }
 
+CF_PRIVATE CFStringRef _CFBundleCopyPrimaryPlatformDirectoryName(void) {
+#if TARGET_OS_MAC
+    return CFSTR("MacOS");
+#elif TARGET_OS_WIN32
+    return CFSTR("Windows");
+#elif DEPLOYMENT_TARGET_SOLARIS
+    return CFSTR("Solaris");
+#elif DEPLOYMENT_TARGET_HPUX
+    return CFSTR("HPUX");
+#elif TARGET_OS_LINUX
+#if TARGET_OS_CYGWIN
+    return CFSTR("Cygwin");
+#else
+    return CFSTR("Linux");
+#endif
+#elif TARGET_OS_BSD
+#if defined(__FreeBSD__)
+    return CFSTR("FreeBSD");
+#elif defined(__NetBSD__)
+    return CFSTR("NetBSD");
+#elif defined(__OpenBSD__)
+    return CFSTR("OpenBSD");
+#elif defined(__DragonFly__)
+    return CFSTR("DragonFly");
+#else
+    return CFSTR("BSD");
+#endif
+#elif TARGET_OS_WASI
+    return CFSTR("WASI");
+#else
+#error Unknown or unspecified DEPLOYMENT_TARGET
+#endif
+}
+
+CF_PRIVATE CFArrayRef _CFBundleCopyPlatformDirectoryNames(void) {
+    CFStringRef names[2];
+    CFIndex count = 0;
+    CFStringRef primary = _CFBundleCopyPrimaryPlatformDirectoryName();
+    
+    names[count++] = primary;
+    
+#if (TARGET_OS_LINUX && !TARGET_OS_CYGWIN) || TARGET_OS_BSD
+    /* THE UNIVERSAL SLOT. Before the platform axis existed, every Agora bundle put its executable in
+     * `Contents/MacOS` whatever the host was (see the note on _CFBundleGetPlatformExecutablesSubdirectoryName
+     * above), so that directory remains the LAST platform tried on Linux and the BSDs. It is not tried twice
+     * on macOS, where it is already the primary name. */
+    if (CFStringCompare(primary, CFSTR("MacOS"), 0) != kCFCompareEqualTo) names[count++] = CFSTR("MacOS");
+#endif
+    
+    return CFArrayCreate(kCFAllocatorSystemDefault, (const void **)names, count, &kCFTypeArrayCallBacks);
+}
+
+CF_PRIVATE CFArrayRef _CFBundleCopyArchitectureDirectoryNames(void) {
+    /* THE RUNNING ARCHITECTURE, CANONICALLY FIRST and with the other common spelling second, because a bundle
+     * produced by a Linux build says `x86_64` where a BSD one says `amd64`, and neither spelling deserves to be
+     * the reason an otherwise correct bundle refuses. The list is empty when the architecture is one this file
+     * does not know; the unsuffixed candidates are then the only ones tried, which is the old behaviour. */
+    CFStringRef names[2];
+    CFIndex count = 0;
+#if defined(__x86_64__) || defined(_M_X64)
+    names[count++] = CFSTR("amd64");
+    names[count++] = CFSTR("x86_64");
+#elif defined(__aarch64__) || defined(__arm64__)
+    names[count++] = CFSTR("arm64");
+    names[count++] = CFSTR("aarch64");
+#elif defined(__riscv) && (__riscv_xlen == 64)
+    names[count++] = CFSTR("riscv64");
+    names[count++] = CFSTR("riscv");
+#elif defined(__i386__) || defined(_M_IX86)
+    names[count++] = CFSTR("i386");
+    names[count++] = CFSTR("x86");
+#elif defined(__powerpc64__) || defined(__ppc64__)
+    names[count++] = CFSTR("ppc64");
+    names[count++] = CFSTR("powerpc64");
+#elif defined(__powerpc__) || defined(__ppc__)
+    names[count++] = CFSTR("ppc");
+#endif
+    return CFArrayCreate(kCFAllocatorSystemDefault, (const void **)names, count, &kCFTypeArrayCallBacks);
+}
+
+/* The full vocabulary rather than the host's own names: the reverse mapping has to recognise a slice that was
+ * laid down on a different machine, and a bundle may legitimately carry one. */
+static const char *const _CFBundlePlatformDirectoryNames[] = {
+    "MacOS", "Linux", "FreeBSD", "NetBSD", "OpenBSD", "DragonFly", "Windows", "Solaris", "HPUX", "Cygwin", "WASI"
+};
+
+static const char *const _CFBundleArchitectureDirectoryNames[] = {
+    "amd64", "x86_64", "arm64", "aarch64", "i386", "x86",
+    "riscv64", "riscv", "ppc", "ppc64", "powerpc64"
+};
+
+static Boolean _CFBundleNameIsInTable(CFStringRef name, const char *const *table, size_t count) {
+    char buffer[32];
+    size_t i;
+    
+    if (!name || CFStringGetLength(name) >= (CFIndex)sizeof(buffer)) return false;
+    if (!CFStringGetCString(name, buffer, sizeof(buffer), kCFStringEncodingUTF8)) return false;
+    for (i = 0; i < count; i++) {
+        if (0 == strcmp(buffer, table[i])) return true;
+    }
+    return false;
+}
+
+CF_PRIVATE Boolean _CFBundleIsPlatformDirectoryName(CFStringRef name) {
+    return _CFBundleNameIsInTable(name, _CFBundlePlatformDirectoryNames, sizeof(_CFBundlePlatformDirectoryNames) / sizeof(_CFBundlePlatformDirectoryNames[0]));
+}
+
+CF_PRIVATE Boolean _CFBundleIsArchitectureDirectoryName(CFStringRef name) {
+    return _CFBundleNameIsInTable(name, _CFBundleArchitectureDirectoryNames, sizeof(_CFBundleArchitectureDirectoryNames) / sizeof(_CFBundleArchitectureDirectoryNames[0]));
+}
+
 CFArrayRef CFBundleCopyExecutableArchitecturesForURL(CFURLRef url) {
     CFArrayRef result = NULL;
     CFBundleRef bundle = CFBundleCreate(kCFAllocatorSystemDefault, url);

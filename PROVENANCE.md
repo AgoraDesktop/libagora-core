@@ -113,6 +113,43 @@ names the OS rather than a directory, is deliberately left at the host's answer.
 executable in the consumer (`libagora-launchservices`) — was built first and then removed in favour of fixing it
 at the source.
 
+### `CFBundle_Resources.c` / `CFBundle_Executable.c`: the platform and architecture axes
+
+**A BUNDLE MAY CARRY ONE EXECUTABLE PER PLATFORM AND PER ARCHITECTURE, AND THE DIRECTORY — NOT THE FILE NAME —
+CARRIES THE AXIS.** `Contents/Linux/amd64/Workspace`, `Contents/FreeBSD/amd64/Workspace`,
+`Contents/NetBSD/aarch64/Workspace`; `Contents/MacOS/Workspace` remains the single-platform and legacy slot. The
+reason the architecture is a directory rather than a suffix is the kernel: `comm` is the executable's basename
+truncated to 15 characters on Linux, and `-[NSProcessInfo processName]` (`libagora-base/NSProcessInfo.m`) reads
+it, so `Workspace-aarch64` would have titled the application menu `Workspace-aarch6`. A suffixed file name is
+nonetheless ACCEPTED (`Contents/Linux/Workspace-amd64`), because refusing a layout that works costs more than an
+extra `stat`, and the main-bundle probe below covers it.
+
+`_CFBundleCopyExecutableURLInDirectory2()` now tries, in order: `<platform>/<arch>/<exe>`, `<platform>/<exe>-<arch>`,
+`<platform>/<exe>`, then the flat `Contents/<exe>` and the old-style wrapper root. The platform list is the host's
+name first (`Linux`, `FreeBSD`, `NetBSD`, `OpenBSD`, `MacOS`) with **`MacOS` last on Linux and the BSDs** as the
+universal slot, so every bundle written before this change still resolves; the architecture list is the running
+ISA with the other common spelling behind it (`amd64`/`x86_64`, `arm64`/`aarch64`, `riscv64`/`riscv`), and is
+empty for an ISA this file does not know, which degenerates to the old search exactly. The FHS branch
+(`libexec/<Name>.executables/`) goes through the same list.
+
+**`CFBundleGetMainBundle()` WAS THE TRAP.** `_CFBundleCopyBundleURLForExecutablePath()` walked a path back to its
+wrapper by comparing the last directory against `_CFBundleGetPlatformExecutablesSubdirectoryName()` alone, so
+`…/Contents/Linux/amd64/Workspace` stopped at `…/Contents/Linux/amd64` — a directory with no `Contents/Info.plist`
+— and the main bundle degraded to `NotABundle`, losing its identifier and its resources. It now strips an
+architecture directory first, and only when the directory above it really is a platform directory (a bundle whose
+own name is `arm64` is not a slice).
+
+MEASURED against synthetic bundles: `Contents/Linux/amd64/Workspace` resolves; a legacy `Contents/MacOS/Workspace`
+still resolves (the real `workspace/build/Workspace.app` included); a foreign-only slice
+(`Contents/FreeBSD/amd64/Workspace`) and a wrong-architecture one (`Contents/Linux/arm64/Workspace`) answer NULL
+rather than a slice this machine cannot run; and a binary run from inside a slice sees `CFBundleGetMainBundle()`
+answer the `.app` wrapper with its `CFBundleIdentifier` intact, for both the directory and the suffixed-name
+layouts.
+
+KNOWN GAP, stated rather than implied: the reverse mapping still assumes the executable is at
+`<Contents>/<platform>[/<arch>]/<exe>`. A framework nested deeper (`Contents/Frameworks/Linux/amd64/Foo.framework/…`)
+walks back only to `…/Contents`, which is the same class of approximation upstream shipped and not a regression.
+
 ### `CFHyphenation.c`, which upstream does not have here
 
 `CFString.h` declares `CFStringGetHyphenationLocationBeforeIndex` and

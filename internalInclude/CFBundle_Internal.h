@@ -211,6 +211,17 @@ CF_PRIVATE void _CFBundleRefreshInfoDictionaryAlreadyLocked(CFBundleRef bundle);
 
 CF_PRIVATE CFStringRef _CFBundleGetPlatformExecutablesSubdirectoryName(void);
 
+/* THE PLATFORM AND ARCHITECTURE AXES OF A BUNDLE'S EXECUTABLE SEARCH. A bundle may carry one executable per
+ * platform (`Contents/Linux/`, `Contents/FreeBSD/`) and one per architecture on each (`Contents/Linux/amd64/`).
+ * `_CFBundleCopyPlatformDirectoryNames()` answers the directories to try for THIS host, in order, with `MacOS`
+ * last on Linux and the BSDs so a bundle written before the platform axis existed still resolves. The two
+ * `Is...` tests answer the reverse question, used when a path has to be walked back up to its bundle. */
+CF_PRIVATE CFStringRef _CFBundleCopyPrimaryPlatformDirectoryName(void);
+CF_PRIVATE CFArrayRef _CFBundleCopyPlatformDirectoryNames(void);
+CF_PRIVATE CFArrayRef _CFBundleCopyArchitectureDirectoryNames(void);
+CF_PRIVATE Boolean _CFBundleIsPlatformDirectoryName(CFStringRef name);
+CF_PRIVATE Boolean _CFBundleIsArchitectureDirectoryName(CFStringRef name);
+
 CF_PRIVATE void _CFPlugInUnscheduleForUnloading(CFBundleRef bundle);
 CF_PRIVATE void _CFPlugInUnloadScheduledPlugIns(void);
 CF_PRIVATE void _CFBundleUnloadExecutable(CFBundleRef bundle, Boolean unloadingPlugins);

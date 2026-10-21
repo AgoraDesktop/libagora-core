@@ -266,10 +266,42 @@ static CFURLRef _CFBundleCopyExecutableURLInDirectory2(CFBundleRef bundle, CFURL
 #endif
                 }
                 
-                // Historical note: This used to search the directories "Mac OS X", "MacOSClassic", then "MacOS8". As of 10.13 we only look in "MacOS".
-                CFURLRef exeSubdirURL = CFURLCreateWithFileSystemPathRelativeToBase(kCFAllocatorSystemDefault, _CFBundleGetPlatformExecutablesSubdirectoryName(), kCFURLPOSIXPathStyle, true, exeDirURL);
-                executableURL = _CFBundleCopyExecutableURLRaw(exeSubdirURL, executableName);
-                CFRelease(exeSubdirURL);
+                /* WHERE THE EXECUTABLE IS LOOKED FOR, IN ORDER. The platform axis is a directory
+                 * (`Contents/Linux/`); the architecture axis is a directory inside it
+                 * (`Contents/Linux/amd64/`), and an architecture-suffixed file name (`Workspace-amd64`) is
+                 * accepted too. The unsuffixed name inside the platform directory is the catch-all, so a
+                 * single universal binary, or a bundle written before either axis existed, still resolves. */
+                CFArrayRef platformDirs = _CFBundleCopyPlatformDirectoryNames();
+                CFArrayRef archNames = _CFBundleCopyArchitectureDirectoryNames();
+                CFIndex platformCount = CFArrayGetCount(platformDirs);
+                CFIndex archCount = CFArrayGetCount(archNames);
+                CFIndex p, a;
+                
+                for (p = 0; p < platformCount && !executableURL; p++) {
+                    CFStringRef platformDir = (CFStringRef)CFArrayGetValueAtIndex(platformDirs, p);
+                    CFURLRef platformURL = CFURLCreateCopyAppendingPathComponent(kCFAllocatorSystemDefault, exeDirURL, platformDir, true);
+                    
+                    if (!platformURL) continue;
+                    
+                    for (a = 0; a < archCount && !executableURL; a++) {
+                        CFStringRef archName = (CFStringRef)CFArrayGetValueAtIndex(archNames, a);
+                        CFURLRef archURL = CFURLCreateCopyAppendingPathComponent(kCFAllocatorSystemDefault, platformURL, archName, true);
+                        
+                        if (archURL) {
+                            executableURL = _CFBundleCopyExecutableURLRaw(archURL, executableName);
+                            CFRelease(archURL);
+                        }
+                        if (!executableURL) {
+                            CFStringRef suffixedName = CFStringCreateWithFormat(kCFAllocatorSystemDefault, NULL, CFSTR("%@-%@"), executableName, archName);
+                            executableURL = _CFBundleCopyExecutableURLRaw(platformURL, suffixedName);
+                            CFRelease(suffixedName);
+                        }
+                    }
+                    if (!executableURL) executableURL = _CFBundleCopyExecutableURLRaw(platformURL, executableName);
+                    CFRelease(platformURL);
+                }
+                CFRelease(platformDirs);
+                CFRelease(archNames);
                 
                 if (!executableURL) executableURL = _CFBundleCopyExecutableURLRaw(exeDirURL, executableName);
                 CFRelease(exeDirURL);
@@ -364,7 +396,29 @@ static CFURLRef _CFBundleCopyBundleURLForExecutablePath(CFStringRef str) {
             if (startOfLastDir > 0 && startOfLastDir < buffLen) {
                 CFStringRef lastDirName = CFStringCreateWithCharacters(kCFAllocatorSystemDefault, &(buff[startOfLastDir]), buffLen - startOfLastDir);
                 
-                if (CFEqual(lastDirName, _CFBundleGetPlatformExecutablesSubdirectoryName())) {
+                /* AN ARCHITECTURE DIRECTORY SITS INSIDE A PLATFORM DIRECTORY, so it is removed first, and only
+                 * when its parent really is a platform directory: a bundle whose own name happens to be `arm64`
+                 * is not a slice. Without this, `…/Contents/Linux/amd64/Workspace` walked back only as far as
+                 * `…/Contents/Linux/amd64` — which has no `Contents/Info.plist` — and the main bundle degraded to
+                 * NotABundle, losing its identifier and its resources. */
+                if (_CFBundleIsArchitectureDirectoryName(lastDirName)) {
+                    CFIndex parentLen = _CFLengthAfterDeletingLastPathComponent(buff, buffLen);
+                    CFIndex startOfParentDir = (parentLen > 0) ? _CFStartOfLastPathComponent(buff, parentLen) : 0;
+                    
+                    if (startOfParentDir > 0 && startOfParentDir < parentLen) {
+                        CFStringRef parentDirName = CFStringCreateWithCharacters(kCFAllocatorSystemDefault, &(buff[startOfParentDir]), parentLen - startOfParentDir);
+                        
+                        if (_CFBundleIsPlatformDirectoryName(parentDirName)) {
+                            buffLen = parentLen;
+                            CFRelease(lastDirName);
+                            lastDirName = parentDirName;
+                        } else {
+                            CFRelease(parentDirName);
+                        }
+                    }
+                }
+                
+                if (_CFBundleIsPlatformDirectoryName(lastDirName)) {
                     // This is a new bundle.  Back off a few more levels
                     if (buffLen > 0) {
                         // Remove platform folder
