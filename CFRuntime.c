@@ -3309,10 +3309,17 @@ CF_INLINE Boolean CFTYPE_IS_SWIFT(const void *obj) {
  * `reg_equality` asserts. Apple withholds EVERY Core Foundation object because Apple's two hashes agree;
  * Agora's do not, and this dispatch is what holds the bridge together until they do. */
 #if defined(__OBJC__)
+/* ⚠⚠ CAST TO THE BRIDGED CONTRACT, NOT TO `id` (2026-10-21, issue 6). A message to `id` is assumed to
+ * answer an OBJECT, so `(Boolean)[(id)obj isEqual:x]` read a pointer-sized result and kept its low byte.
+ * MEASURED: `-[NSNull isEqual:]` answers 0, but the truncated pointer was odd on x86-64 — so `CFEqual`
+ * reported TRUE there and FALSE on aarch64, where the return register is zeroed. The answer was an
+ * accident of register contents, which is exactly the kind of thing an architecture comparison finds
+ * and a single-platform test does not. The protocol (CFBridgedMethods.h) is where these selectors carry
+ * their real return types, and CFInternal.h's CF_OBJC_FUNCDISPATCH family already casts this way. */
 #define CFTYPE_OBJC_FUNCDISPATCH0(rettype, obj, sel) \
-    do { if (_CFIsAnObject(obj) && !cf_is_generic_object(obj)) return (rettype)[(id)(obj) sel]; } while (0)
+    do { if (_CFIsAnObject(obj) && !cf_is_generic_object(obj)) return (rettype)[(id<__CFBridgedMethods>)(obj) sel]; } while (0)
 #define CFTYPE_OBJC_FUNCDISPATCH1(rettype, obj, sel, a1) \
-    do { if (_CFIsAnObject(obj) && !cf_is_generic_object(obj)) return (rettype)[(id)(obj) sel (a1)]; } while (0)
+    do { if (_CFIsAnObject(obj) && !cf_is_generic_object(obj)) return (rettype)[(id<__CFBridgedMethods>)(obj) sel (a1)]; } while (0)
 #else
 #define CFTYPE_OBJC_FUNCDISPATCH0(rettype, obj, sel) do {} while (0)
 #define CFTYPE_OBJC_FUNCDISPATCH1(rettype, obj, sel, a1) do {} while (0)

@@ -56,6 +56,16 @@ typedef struct __CFString *CFMutableStringRef;
 - (BOOL)isKindOfClass:(Class)cls;
 /* NSString: CFString.c's hash length. */
 - (NSUInteger)length;
+/* **THE THREE OBJECT QUESTIONS, AND THEIR RETURN TYPES ARE THE WHOLE REASON THIS PROTOCOL EXISTS.**
+ * CFRuntime.c's CFTYPE_OBJC_FUNCDISPATCH macros send these three to a receiver typed `id`, and `id` makes
+ * the compiler assume an OBJECT comes back — so `(Boolean)[(id)obj isEqual:x]` read a POINTER-sized result
+ * and kept its low byte. MEASURED, and it is the defect that made issue 6 hide: `-[NSNull isEqual:]`
+ * answers 0, but the truncated pointer happened to be odd on x86-64, so `CFEqual` reported 1 there and 0
+ * on aarch64, where the register is zeroed. Declared here, the macro's cast supplies the real type and the
+ * byte that is read is the one the method wrote. */
+- (BOOL)isEqual:(id)other;
+- (NSUInteger)hash;
+- (CFStringRef)_copyDescription;
 /* NSDate and NSTimeZone: CFDate.c and CFTimeZone.c, all four answering seconds. */
 - (CFTimeInterval)timeIntervalSinceReferenceDate;
 - (CFTimeInterval)timeIntervalSinceDate:(id)otherDate;
