@@ -544,6 +544,15 @@ static const char *cf_imp_string_utf8(id self, SEL _cmd)
 	return CFStringGetCStringPtr((CFStringRef)self, kCFStringEncodingUTF8);
 }
 
+/* THE RUNTIME OWNS BOOL'S ENCODING, NOT THIS FILE. BOOL is a _Bool on arm64 and a signed char
+ * elsewhere, and libobjc2 keys typed dispatch on (selector, encoding), so the tables below spell the
+ * leading char OBJC_BOOL_TYPE_ENCODING rather than a literal. That macro lives beside the typedef in
+ * objc/runtime.h; if it is missing the installed runtime is older than these tables and the answers they
+ * would publish are the wrong ones, so stop here rather than at three failed cases in Foundation. */
+#if !defined(OBJC_BOOL_TYPE_ENCODING)
+#error "objc/runtime.h defines no OBJC_BOOL_TYPE_ENCODING: update libagora-objc, which owns the BOOL definition these tables have to agree with"
+#endif
+
 /* ---------------------------------------------------------------------------
  * THE TABLE OF CORE FOUNDATION-OWNED CLASSES, AND THE LESSON IS THAT IT IS SHORT.
  *
@@ -575,6 +584,16 @@ static const char *cf_imp_string_utf8(id self, SEL _cmd)
  *
  * SELECTORS ARE NAMED, NOT @selector()d: @selector is a call to sel_registerName and cannot appear in a
  * static initialiser, so the table holds names and cf_bridged_subclass registers them.
+ *
+ * A BOOL-RETURNING ROW SPELLS ITS LEADING TYPE CHAR OBJC_BOOL_TYPE_ENCODING, NOT A LITERAL, and that is
+ * the third version of these tables. The char is a property of the TARGET, not of this file: `B` on arm64,
+ * where STRICT_APPLE_COMPATIBILITY makes BOOL a _Bool, and `c` on x86_64, where it is a signed char. The
+ * rows used to say `C`, and then a commit made them say `c` for every architecture, which is right here and
+ * wrong there: on arm64 the bridge published `c16@0:8` for -isFileURL where the compiler published
+ * `B16@0:8`, libobjc2 found no method for (selector, encoding), and the send fell through to NSURL's own
+ * -isFileURL reading an ivar the CF object never had. THREE Foundation cases went 77/77 -> 74/77 -- CFURL,
+ * CFCharacterSet and CFRunLoopTimer -- and every one of them was this. The macro comes from the runtime
+ * header, next to the typedef, so the type and its encoding are chosen in one place.
  * ------------------------------------------------------------------------- */
 typedef struct {
 	const char *name;
@@ -1354,10 +1373,10 @@ static long cf_imp_timezone_seconds_from_gmt(id self, SEL _cmd, id date)
 	return (long)CFTimeZoneGetSecondsFromGMT((CFTimeZoneRef)self, cf_absolute_time_of(date));
 }
 
-static char cf_imp_timezone_is_dst(id self, SEL _cmd, id date)
+static BOOL cf_imp_timezone_is_dst(id self, SEL _cmd, id date)
 {
 	(void)_cmd;
-	return (char)(CFTimeZoneIsDaylightSavingTime((CFTimeZoneRef)self, cf_absolute_time_of(date)) ? 1 : 0);
+	return CFTimeZoneIsDaylightSavingTime((CFTimeZoneRef)self, cf_absolute_time_of(date)) ? true : false;
 }
 
 static id cf_imp_timezone_next_transition(id self, SEL _cmd, id date)
@@ -1405,7 +1424,7 @@ static id cf_imp_timezone_data(id self, SEL _cmd)
 static const cf_own_method cf_timezone_methods[] = {
 	{ "name", (IMP)cf_imp_timezone_name, "@@:" },
 	{ "secondsFromGMTForDate:", (IMP)cf_imp_timezone_seconds_from_gmt, "q@:@" },
-	{ "isDaylightSavingTimeForDate:", (IMP)cf_imp_timezone_is_dst, "c24@0:8@16" },
+	{ "isDaylightSavingTimeForDate:", (IMP)cf_imp_timezone_is_dst, OBJC_BOOL_TYPE_ENCODING "24@0:8@16" },
 	{ "nextDaylightSavingTimeTransitionAfterDate:", (IMP)cf_imp_timezone_next_transition, "@@:@" },
 	{ "abbreviationForDate:", (IMP)cf_imp_timezone_abbreviation, "@@:@" },
 	{ "daylightSavingTimeOffsetForDate:", (IMP)cf_imp_timezone_dst_offset, "d@:@" },
@@ -1543,10 +1562,10 @@ static id cf_imp_url_fragment(id self, SEL _cmd)
 	return cf_imp_url_component(self, CFSTR("#"), NULL);
 }
 
-static char cf_imp_url_is_file(id self, SEL _cmd)
+static BOOL cf_imp_url_is_file(id self, SEL _cmd)
 {
 	(void)_cmd;
-	return (char)(_CFURLIsFileURL((CFURLRef)self) ? 1 : 0);
+	return _CFURLIsFileURL((CFURLRef)self) ? true : false;
 }
 
 static id cf_imp_url_no_cache(id self, SEL _cmd)
@@ -1567,7 +1586,7 @@ static const cf_own_method cf_url_methods[] = {
 	{ "fragment", (IMP)cf_imp_url_fragment, "@@:" },
 	{ "absoluteString", (IMP)cf_imp_url_absolute_string, "@@:" },
 	{ "relativeString", (IMP)cf_imp_url_absolute_string, "@@:" },
-	{ "isFileURL", (IMP)cf_imp_url_is_file, "c16@0:8" },
+	{ "isFileURL", (IMP)cf_imp_url_is_file, OBJC_BOOL_TYPE_ENCODING "16@0:8" },
 	{ "fnCache", (IMP)cf_imp_url_no_cache, "@@:" },
 	{ NULL, NULL, NULL },
 };
@@ -1872,22 +1891,22 @@ static const cf_own_method cf_mutable_attributed_string_methods[] = {
 	{ NULL, NULL, NULL },
 };
 
-static char cf_imp_charset_character_member(id self, SEL _cmd, unsigned short character)
+static BOOL cf_imp_charset_character_member(id self, SEL _cmd, unsigned short character)
 {
 	(void)_cmd;
-	return (char)(CFCharacterSetIsCharacterMember((CFCharacterSetRef)self, (UniChar)character) ? 1 : 0);
+	return CFCharacterSetIsCharacterMember((CFCharacterSetRef)self, (UniChar)character) ? true : false;
 }
 
-static char cf_imp_charset_long_character_member(id self, SEL _cmd, unsigned int character)
+static BOOL cf_imp_charset_long_character_member(id self, SEL _cmd, unsigned int character)
 {
 	(void)_cmd;
-	return (char)(CFCharacterSetIsLongCharacterMember((CFCharacterSetRef)self, (UTF32Char)character) ? 1 : 0);
+	return CFCharacterSetIsLongCharacterMember((CFCharacterSetRef)self, (UTF32Char)character) ? true : false;
 }
 
-static char cf_imp_charset_member_in_plane(id self, SEL _cmd, unsigned char plane)
+static BOOL cf_imp_charset_member_in_plane(id self, SEL _cmd, unsigned char plane)
 {
 	(void)_cmd;
-	return (char)(CFCharacterSetHasMemberInPlane((CFCharacterSetRef)self, (uint8_t)plane) ? 1 : 0);
+	return CFCharacterSetHasMemberInPlane((CFCharacterSetRef)self, (uint8_t)plane) ? true : false;
 }
 
 static id cf_imp_charset_bitmap(id self, SEL _cmd)
@@ -1919,28 +1938,28 @@ static CFCharacterSetRef cf_charset_from_foundation_set(id other);
  * range list out of a Core Foundation object, and reports that two equal sets are unequal. MEASURED: that
  * is what it did, and it PREDATES the mutable half -- the immutable row never had this door, which is why
  * the immutable case in the suite passes without ever comparing two sets for equality. */
-static unsigned char cf_imp_charset_is_superset(id self, SEL _cmd, id other)
+static BOOL cf_imp_charset_is_superset(id self, SEL _cmd, id other)
 {
 	CFCharacterSetRef converted;
-	unsigned char answer = 0;
+	BOOL answer = false;
 
 	(void)_cmd;
 	converted = cf_charset_from_foundation_set(other);
 	if (converted != NULL) {
-		answer = CFCharacterSetIsSupersetOfSet((CFCharacterSetRef)self, converted) ? 1 : 0;
+		answer = CFCharacterSetIsSupersetOfSet((CFCharacterSetRef)self, converted) ? true : false;
 		CFRelease(converted);
 	}
 	return answer;
 }
 
 static const cf_own_method cf_charset_methods[] = {
-	{ "characterIsMember:", (IMP)cf_imp_charset_character_member, "c20@0:8S16" },
-	{ "longCharacterIsMember:", (IMP)cf_imp_charset_long_character_member, "c20@0:8I16" },
-	{ "hasMemberInPlane:", (IMP)cf_imp_charset_member_in_plane, "c20@0:8C16" },
+	{ "characterIsMember:", (IMP)cf_imp_charset_character_member, OBJC_BOOL_TYPE_ENCODING "20@0:8S16" },
+	{ "longCharacterIsMember:", (IMP)cf_imp_charset_long_character_member, OBJC_BOOL_TYPE_ENCODING "20@0:8I16" },
+	{ "hasMemberInPlane:", (IMP)cf_imp_charset_member_in_plane, OBJC_BOOL_TYPE_ENCODING "20@0:8C16" },
 	{ "bitmapRepresentation", (IMP)cf_imp_charset_bitmap, "@@:" },
 	{ "invertedSet", (IMP)cf_imp_charset_inverted, "@@:" },
 	{ "mutableCopy", (IMP)cf_imp_charset_mutable_copy, "@@:" },
-	{ "isSupersetOfSet:", (IMP)cf_imp_charset_is_superset, "c24@0:8@16" },
+	{ "isSupersetOfSet:", (IMP)cf_imp_charset_is_superset, OBJC_BOOL_TYPE_ENCODING "24@0:8@16" },
 	{ NULL, NULL, NULL },
 };
 
@@ -2030,13 +2049,13 @@ static id cf_imp_mutable_charset_init(id self, SEL _cmd)
 }
 
 static const cf_own_method cf_mutable_charset_methods[] = {
-	{ "characterIsMember:", (IMP)cf_imp_charset_character_member, "c20@0:8S16" },
-	{ "longCharacterIsMember:", (IMP)cf_imp_charset_long_character_member, "c20@0:8I16" },
-	{ "hasMemberInPlane:", (IMP)cf_imp_charset_member_in_plane, "c20@0:8C16" },
+	{ "characterIsMember:", (IMP)cf_imp_charset_character_member, OBJC_BOOL_TYPE_ENCODING "20@0:8S16" },
+	{ "longCharacterIsMember:", (IMP)cf_imp_charset_long_character_member, OBJC_BOOL_TYPE_ENCODING "20@0:8I16" },
+	{ "hasMemberInPlane:", (IMP)cf_imp_charset_member_in_plane, OBJC_BOOL_TYPE_ENCODING "20@0:8C16" },
 	{ "bitmapRepresentation", (IMP)cf_imp_charset_bitmap, "@@:" },
 	{ "invertedSet", (IMP)cf_imp_charset_inverted, "@@:" },
 	{ "mutableCopy", (IMP)cf_imp_charset_mutable_copy, "@@:" },
-	{ "isSupersetOfSet:", (IMP)cf_imp_charset_is_superset, "c24@0:8@16" },
+	{ "isSupersetOfSet:", (IMP)cf_imp_charset_is_superset, OBJC_BOOL_TYPE_ENCODING "24@0:8@16" },
 	{ "formUnionWithCharacterSet:", (IMP)cf_imp_mutable_charset_form_union, "v@:@" },
 	{ "formIntersectionWithCharacterSet:", (IMP)cf_imp_mutable_charset_form_intersection, "v@:@" },
 	{ "invert", (IMP)cf_imp_mutable_charset_invert, "v@:" },
@@ -2074,16 +2093,16 @@ static long cf_imp_read_stream_read(id self, SEL _cmd, char *buffer, unsigned lo
 	return (long)CFReadStreamRead((CFReadStreamRef)self, (UInt8 *)buffer, (CFIndex)length);
 }
 
-static char cf_imp_read_stream_has_bytes(id self, SEL _cmd)
+static BOOL cf_imp_read_stream_has_bytes(id self, SEL _cmd)
 {
 	(void)_cmd;
-	return (char)(CFReadStreamHasBytesAvailable((CFReadStreamRef)self) ? 1 : 0);
+	return CFReadStreamHasBytesAvailable((CFReadStreamRef)self) ? true : false;
 }
 
 /* CFReadStreamGetBuffer ANSWERS THE POINTER AND WRITES THE COUNT, while this method answers a BOOLEAN and
  * writes both -- the same question in two shapes, so the answer is the pointer's non-nullness. The caller's
  * incoming `*length` is the most it wants to read, which is exactly Core Foundation's maxBytesToRead. */
-static char cf_imp_read_stream_get_buffer(id self, SEL _cmd, const unsigned char **buffer, unsigned long *length)
+static BOOL cf_imp_read_stream_get_buffer(id self, SEL _cmd, const unsigned char **buffer, unsigned long *length)
 {
 	CFIndex used = 0;
 	const UInt8 *bytes;
@@ -2091,7 +2110,7 @@ static char cf_imp_read_stream_get_buffer(id self, SEL _cmd, const unsigned char
 	(void)_cmd;
 	bytes = CFReadStreamGetBuffer((CFReadStreamRef)self, (CFIndex)(length != NULL ? *length : 0), &used);
 	if (bytes == NULL) {
-		return 0;
+		return false;
 	}
 	if (buffer != NULL) {
 		*buffer = bytes;
@@ -2099,7 +2118,7 @@ static char cf_imp_read_stream_get_buffer(id self, SEL _cmd, const unsigned char
 	if (length != NULL) {
 		*length = (unsigned long)used;
 	}
-	return 1;
+	return true;
 }
 
 static id cf_imp_read_stream_property(id self, SEL _cmd, id key)
@@ -2108,10 +2127,10 @@ static id cf_imp_read_stream_property(id self, SEL _cmd, id key)
 	return cf_bridge_autorelease(CFReadStreamCopyProperty((CFReadStreamRef)self, (CFStringRef)key));
 }
 
-static char cf_imp_read_stream_set_property(id self, SEL _cmd, id property, id key)
+static BOOL cf_imp_read_stream_set_property(id self, SEL _cmd, id property, id key)
 {
 	(void)_cmd;
-	return (char)(CFReadStreamSetProperty((CFReadStreamRef)self, (CFStringRef)key, (CFTypeRef)property) ? 1 : 0);
+	return CFReadStreamSetProperty((CFReadStreamRef)self, (CFStringRef)key, (CFTypeRef)property) ? true : false;
 }
 
 static void cf_imp_read_stream_open(id self, SEL _cmd)
@@ -2143,10 +2162,10 @@ static unsigned long cf_imp_read_stream_event(id self, SEL _cmd)
 static const cf_own_method cf_read_stream_methods[] = {
 	{ "streamStatus", (IMP)cf_imp_read_stream_status, "Q@:" },
 	{ "read:maxLength:", (IMP)cf_imp_read_stream_read, "q@:*Q" },
-	{ "hasBytesAvailable", (IMP)cf_imp_read_stream_has_bytes, "c16@0:8" },
-	{ "getBuffer:length:", (IMP)cf_imp_read_stream_get_buffer, "c32@0:8^*16^Q24" },
+	{ "hasBytesAvailable", (IMP)cf_imp_read_stream_has_bytes, OBJC_BOOL_TYPE_ENCODING "16@0:8" },
+	{ "getBuffer:length:", (IMP)cf_imp_read_stream_get_buffer, OBJC_BOOL_TYPE_ENCODING "32@0:8^*16^Q24" },
 	{ "propertyForKey:", (IMP)cf_imp_read_stream_property, "@@:@" },
-	{ "setProperty:forKey:", (IMP)cf_imp_read_stream_set_property, "c32@0:8@16@24" },
+	{ "setProperty:forKey:", (IMP)cf_imp_read_stream_set_property, OBJC_BOOL_TYPE_ENCODING "32@0:8@16@24" },
 	{ "open", (IMP)cf_imp_read_stream_open, "v@:" },
 	{ "close", (IMP)cf_imp_read_stream_close, "v@:" },
 	{ "fnStreamDescriptor", (IMP)cf_imp_stream_no_descriptor, "i@:" },
@@ -2166,11 +2185,11 @@ static long cf_imp_write_stream_write(id self, SEL _cmd, const char *buffer, uns
 	return (long)CFWriteStreamWrite((CFWriteStreamRef)self, (const UInt8 *)buffer, (CFIndex)length);
 }
 
-static char cf_imp_write_stream_has_space(id self, SEL _cmd)
+static BOOL cf_imp_write_stream_has_space(id self, SEL _cmd)
 {
 	(void)_cmd;
 	/* CORE FOUNDATION CALLS THIS CanAcceptBytes, and it is the same question: whether a write would block. */
-	return (char)(CFWriteStreamCanAcceptBytes((CFWriteStreamRef)self) ? 1 : 0);
+	return CFWriteStreamCanAcceptBytes((CFWriteStreamRef)self) ? true : false;
 }
 
 static id cf_imp_write_stream_property(id self, SEL _cmd, id key)
@@ -2179,10 +2198,10 @@ static id cf_imp_write_stream_property(id self, SEL _cmd, id key)
 	return cf_bridge_autorelease(CFWriteStreamCopyProperty((CFWriteStreamRef)self, (CFStringRef)key));
 }
 
-static char cf_imp_write_stream_set_property(id self, SEL _cmd, id property, id key)
+static BOOL cf_imp_write_stream_set_property(id self, SEL _cmd, id property, id key)
 {
 	(void)_cmd;
-	return (char)(CFWriteStreamSetProperty((CFWriteStreamRef)self, (CFStringRef)key, (CFTypeRef)property) ? 1 : 0);
+	return CFWriteStreamSetProperty((CFWriteStreamRef)self, (CFStringRef)key, (CFTypeRef)property) ? true : false;
 }
 
 static void cf_imp_write_stream_open(id self, SEL _cmd)
@@ -2200,9 +2219,9 @@ static void cf_imp_write_stream_close(id self, SEL _cmd)
 static const cf_own_method cf_write_stream_methods[] = {
 	{ "streamStatus", (IMP)cf_imp_write_stream_status, "Q@:" },
 	{ "write:maxLength:", (IMP)cf_imp_write_stream_write, "q@:r*Q" },
-	{ "hasSpaceAvailable", (IMP)cf_imp_write_stream_has_space, "c16@0:8" },
+	{ "hasSpaceAvailable", (IMP)cf_imp_write_stream_has_space, OBJC_BOOL_TYPE_ENCODING "16@0:8" },
 	{ "propertyForKey:", (IMP)cf_imp_write_stream_property, "@@:@" },
-	{ "setProperty:forKey:", (IMP)cf_imp_write_stream_set_property, "c32@0:8@16@24" },
+	{ "setProperty:forKey:", (IMP)cf_imp_write_stream_set_property, OBJC_BOOL_TYPE_ENCODING "32@0:8@16@24" },
 	{ "open", (IMP)cf_imp_write_stream_open, "v@:" },
 	{ "close", (IMP)cf_imp_write_stream_close, "v@:" },
 	{ "fnStreamDescriptor", (IMP)cf_imp_stream_no_descriptor, "i@:" },
@@ -2251,10 +2270,10 @@ static void cf_imp_timer_set_fire_date(id self, SEL _cmd, id date)
 	}
 }
 
-static char cf_imp_timer_is_valid(id self, SEL _cmd)
+static BOOL cf_imp_timer_is_valid(id self, SEL _cmd)
 {
 	(void)_cmd;
-	return (char)(CFRunLoopTimerIsValid((CFRunLoopTimerRef)self) ? 1 : 0);
+	return CFRunLoopTimerIsValid((CFRunLoopTimerRef)self) ? true : false;
 }
 
 static void cf_imp_timer_invalidate(id self, SEL _cmd)
@@ -2275,10 +2294,10 @@ static void cf_imp_timer_set_tolerance(id self, SEL _cmd, double tolerance)
 	CFRunLoopTimerSetTolerance((CFRunLoopTimerRef)self, (CFTimeInterval)tolerance);
 }
 
-static char cf_imp_timer_repeats(id self, SEL _cmd)
+static BOOL cf_imp_timer_repeats(id self, SEL _cmd)
 {
 	(void)_cmd;
-	return (char)(CFRunLoopTimerDoesRepeat((CFRunLoopTimerRef)self) ? 1 : 0);
+	return CFRunLoopTimerDoesRepeat((CFRunLoopTimerRef)self) ? true : false;
 }
 
 static id cf_imp_timer_user_info(id self, SEL _cmd)
@@ -2300,11 +2319,11 @@ static const cf_own_method cf_timer_methods[] = {
 	{ "timeInterval", (IMP)cf_imp_timer_interval, "d@:" },
 	{ "fireDate", (IMP)cf_imp_timer_fire_date, "@@:" },
 	{ "setFireDate:", (IMP)cf_imp_timer_set_fire_date, "v@:@" },
-	{ "isValid", (IMP)cf_imp_timer_is_valid, "c16@0:8" },
+	{ "isValid", (IMP)cf_imp_timer_is_valid, OBJC_BOOL_TYPE_ENCODING "16@0:8" },
 	{ "invalidate", (IMP)cf_imp_timer_invalidate, "v@:" },
 	{ "tolerance", (IMP)cf_imp_timer_tolerance, "d@:" },
 	{ "setTolerance:", (IMP)cf_imp_timer_set_tolerance, "v@:d" },
-	{ "fnRepeats", (IMP)cf_imp_timer_repeats, "c16@0:8" },
+	{ "fnRepeats", (IMP)cf_imp_timer_repeats, OBJC_BOOL_TYPE_ENCODING "16@0:8" },
 	{ "userInfo", (IMP)cf_imp_timer_user_info, "@@:" },
 	{ "fire", (IMP)cf_imp_timer_fire, "v@:" },
 	{ NULL, NULL, NULL },
