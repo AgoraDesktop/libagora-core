@@ -698,7 +698,7 @@ static double cf_imp_boolean_double(id self, SEL _cmd)
 }
 
 static const cf_own_method cf_boolean_methods[] = {
-	{ "agKind", (IMP)cf_imp_boolean_kind, "C@:" },
+	{ "agKind", (IMP)cf_imp_boolean_kind, "C16@0:8" },
 	{ "longLongValue", (IMP)cf_imp_boolean_ll, "q@:" },
 	{ "unsignedLongLongValue", (IMP)cf_imp_boolean_ull, "Q@:" },
 	{ "doubleValue", (IMP)cf_imp_boolean_double, "d@:" },
@@ -706,7 +706,7 @@ static const cf_own_method cf_boolean_methods[] = {
 };
 
 static const cf_own_method cf_number_methods[] = {
-	{ "agKind", (IMP)cf_imp_number_kind, "C@:" },
+	{ "agKind", (IMP)cf_imp_number_kind, "C16@0:8" },
 	{ "longLongValue", (IMP)cf_imp_number_ll, "q@:" },
 	{ "unsignedLongLongValue", (IMP)cf_imp_number_ull, "Q@:" },
 	{ "doubleValue", (IMP)cf_imp_number_double, "d@:" },
@@ -1405,7 +1405,7 @@ static id cf_imp_timezone_data(id self, SEL _cmd)
 static const cf_own_method cf_timezone_methods[] = {
 	{ "name", (IMP)cf_imp_timezone_name, "@@:" },
 	{ "secondsFromGMTForDate:", (IMP)cf_imp_timezone_seconds_from_gmt, "q@:@" },
-	{ "isDaylightSavingTimeForDate:", (IMP)cf_imp_timezone_is_dst, "C@:@" },
+	{ "isDaylightSavingTimeForDate:", (IMP)cf_imp_timezone_is_dst, "c24@0:8@16" },
 	{ "nextDaylightSavingTimeTransitionAfterDate:", (IMP)cf_imp_timezone_next_transition, "@@:@" },
 	{ "abbreviationForDate:", (IMP)cf_imp_timezone_abbreviation, "@@:@" },
 	{ "daylightSavingTimeOffsetForDate:", (IMP)cf_imp_timezone_dst_offset, "d@:@" },
@@ -1567,7 +1567,7 @@ static const cf_own_method cf_url_methods[] = {
 	{ "fragment", (IMP)cf_imp_url_fragment, "@@:" },
 	{ "absoluteString", (IMP)cf_imp_url_absolute_string, "@@:" },
 	{ "relativeString", (IMP)cf_imp_url_absolute_string, "@@:" },
-	{ "isFileURL", (IMP)cf_imp_url_is_file, "C@:" },
+	{ "isFileURL", (IMP)cf_imp_url_is_file, "c16@0:8" },
 	{ "fnCache", (IMP)cf_imp_url_no_cache, "@@:" },
 	{ NULL, NULL, NULL },
 };
@@ -1934,13 +1934,13 @@ static unsigned char cf_imp_charset_is_superset(id self, SEL _cmd, id other)
 }
 
 static const cf_own_method cf_charset_methods[] = {
-	{ "characterIsMember:", (IMP)cf_imp_charset_character_member, "C@:S" },
-	{ "longCharacterIsMember:", (IMP)cf_imp_charset_long_character_member, "C@:I" },
-	{ "hasMemberInPlane:", (IMP)cf_imp_charset_member_in_plane, "C@:C" },
+	{ "characterIsMember:", (IMP)cf_imp_charset_character_member, "c20@0:8S16" },
+	{ "longCharacterIsMember:", (IMP)cf_imp_charset_long_character_member, "c20@0:8I16" },
+	{ "hasMemberInPlane:", (IMP)cf_imp_charset_member_in_plane, "c20@0:8C16" },
 	{ "bitmapRepresentation", (IMP)cf_imp_charset_bitmap, "@@:" },
 	{ "invertedSet", (IMP)cf_imp_charset_inverted, "@@:" },
 	{ "mutableCopy", (IMP)cf_imp_charset_mutable_copy, "@@:" },
-	{ "isSupersetOfSet:", (IMP)cf_imp_charset_is_superset, "C@:@" },
+	{ "isSupersetOfSet:", (IMP)cf_imp_charset_is_superset, "c24@0:8@16" },
 	{ NULL, NULL, NULL },
 };
 
@@ -2030,13 +2030,13 @@ static id cf_imp_mutable_charset_init(id self, SEL _cmd)
 }
 
 static const cf_own_method cf_mutable_charset_methods[] = {
-	{ "characterIsMember:", (IMP)cf_imp_charset_character_member, "C@:S" },
-	{ "longCharacterIsMember:", (IMP)cf_imp_charset_long_character_member, "C@:I" },
-	{ "hasMemberInPlane:", (IMP)cf_imp_charset_member_in_plane, "C@:C" },
+	{ "characterIsMember:", (IMP)cf_imp_charset_character_member, "c20@0:8S16" },
+	{ "longCharacterIsMember:", (IMP)cf_imp_charset_long_character_member, "c20@0:8I16" },
+	{ "hasMemberInPlane:", (IMP)cf_imp_charset_member_in_plane, "c20@0:8C16" },
 	{ "bitmapRepresentation", (IMP)cf_imp_charset_bitmap, "@@:" },
 	{ "invertedSet", (IMP)cf_imp_charset_inverted, "@@:" },
 	{ "mutableCopy", (IMP)cf_imp_charset_mutable_copy, "@@:" },
-	{ "isSupersetOfSet:", (IMP)cf_imp_charset_is_superset, "C@:@" },
+	{ "isSupersetOfSet:", (IMP)cf_imp_charset_is_superset, "c24@0:8@16" },
 	{ "formUnionWithCharacterSet:", (IMP)cf_imp_mutable_charset_form_union, "v@:@" },
 	{ "formIntersectionWithCharacterSet:", (IMP)cf_imp_mutable_charset_form_intersection, "v@:@" },
 	{ "invert", (IMP)cf_imp_mutable_charset_invert, "v@:" },
@@ -2143,10 +2143,10 @@ static unsigned long cf_imp_read_stream_event(id self, SEL _cmd)
 static const cf_own_method cf_read_stream_methods[] = {
 	{ "streamStatus", (IMP)cf_imp_read_stream_status, "Q@:" },
 	{ "read:maxLength:", (IMP)cf_imp_read_stream_read, "q@:*Q" },
-	{ "hasBytesAvailable", (IMP)cf_imp_read_stream_has_bytes, "C@:" },
-	{ "getBuffer:length:", (IMP)cf_imp_read_stream_get_buffer, "C@:^*^Q" },
+	{ "hasBytesAvailable", (IMP)cf_imp_read_stream_has_bytes, "c16@0:8" },
+	{ "getBuffer:length:", (IMP)cf_imp_read_stream_get_buffer, "c32@0:8^*16^Q24" },
 	{ "propertyForKey:", (IMP)cf_imp_read_stream_property, "@@:@" },
-	{ "setProperty:forKey:", (IMP)cf_imp_read_stream_set_property, "C@:@@" },
+	{ "setProperty:forKey:", (IMP)cf_imp_read_stream_set_property, "c32@0:8@16@24" },
 	{ "open", (IMP)cf_imp_read_stream_open, "v@:" },
 	{ "close", (IMP)cf_imp_read_stream_close, "v@:" },
 	{ "fnStreamDescriptor", (IMP)cf_imp_stream_no_descriptor, "i@:" },
@@ -2200,9 +2200,9 @@ static void cf_imp_write_stream_close(id self, SEL _cmd)
 static const cf_own_method cf_write_stream_methods[] = {
 	{ "streamStatus", (IMP)cf_imp_write_stream_status, "Q@:" },
 	{ "write:maxLength:", (IMP)cf_imp_write_stream_write, "q@:r*Q" },
-	{ "hasSpaceAvailable", (IMP)cf_imp_write_stream_has_space, "C@:" },
+	{ "hasSpaceAvailable", (IMP)cf_imp_write_stream_has_space, "c16@0:8" },
 	{ "propertyForKey:", (IMP)cf_imp_write_stream_property, "@@:@" },
-	{ "setProperty:forKey:", (IMP)cf_imp_write_stream_set_property, "C@:@@" },
+	{ "setProperty:forKey:", (IMP)cf_imp_write_stream_set_property, "c32@0:8@16@24" },
 	{ "open", (IMP)cf_imp_write_stream_open, "v@:" },
 	{ "close", (IMP)cf_imp_write_stream_close, "v@:" },
 	{ "fnStreamDescriptor", (IMP)cf_imp_stream_no_descriptor, "i@:" },
@@ -2300,11 +2300,11 @@ static const cf_own_method cf_timer_methods[] = {
 	{ "timeInterval", (IMP)cf_imp_timer_interval, "d@:" },
 	{ "fireDate", (IMP)cf_imp_timer_fire_date, "@@:" },
 	{ "setFireDate:", (IMP)cf_imp_timer_set_fire_date, "v@:@" },
-	{ "isValid", (IMP)cf_imp_timer_is_valid, "C@:" },
+	{ "isValid", (IMP)cf_imp_timer_is_valid, "c16@0:8" },
 	{ "invalidate", (IMP)cf_imp_timer_invalidate, "v@:" },
 	{ "tolerance", (IMP)cf_imp_timer_tolerance, "d@:" },
 	{ "setTolerance:", (IMP)cf_imp_timer_set_tolerance, "v@:d" },
-	{ "fnRepeats", (IMP)cf_imp_timer_repeats, "C@:" },
+	{ "fnRepeats", (IMP)cf_imp_timer_repeats, "c16@0:8" },
 	{ "userInfo", (IMP)cf_imp_timer_user_info, "@@:" },
 	{ "fire", (IMP)cf_imp_timer_fire, "v@:" },
 	{ NULL, NULL, NULL },
