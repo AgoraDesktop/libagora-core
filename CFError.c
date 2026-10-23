@@ -497,9 +497,11 @@ static CFTypeRef _CFErrorPOSIXCallBack(CFErrorRef err, CFStringRef key) CF_RETUR
     if (!errStr) return NULL;
     if (CFEqual(key, kCFErrorDescriptionKey)) return errStr;	// If all we wanted was the non-localized description, we're done
     
-#if TARGET_OS_MAC
+#if TARGET_OS_MAC || TARGET_OS_LINUX || TARGET_OS_BSD
     // We need a kCFErrorLocalizedFailureReasonKey, so look up a possible localization for the error message
     // Look for the bundle in /System/Library/CoreServices/CoreTypes.bundle
+    // (Agora: the search-path table answers /System/Library here too, so an installation that ships the
+    // bundle gets the localizations, and one that does not simply finds no bundle.)
     CFArrayRef paths = CFCopySearchPathForDirectoriesInDomains(kCFLibraryDirectory, kCFSystemDomainMask, false);
     if (paths) {
 	if (CFArrayGetCount(paths) > 0) {

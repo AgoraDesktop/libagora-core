@@ -150,6 +150,50 @@ KNOWN GAP, stated rather than implied: the reverse mapping still assumes the exe
 `<Contents>/<platform>[/<arch>]/<exe>`. A framework nested deeper (`Contents/Frameworks/Linux/amd64/Foo.framework/…`)
 walks back only to `…/Contents`, which is the same class of approximation upstream shipped and not a regression.
 
+### The installation's directories: the search path, preferences, and the bundle model
+
+A complete Agora installation carries the Mac OS X directory set (workspace `README.md`, "The
+installation"), so the platform layer points at it rather than at the FHS/XDG defaults upstream chose for
+a non-Darwin build. Every change below is in a `!DEPLOYMENT_RUNTIME_OBJC` / non-Darwin branch, so a Darwin
+build is unchanged.
+
+- **`CFKnownLocations.c`** — the non-Windows, non-Android branch answered `/usr/local/etc` and
+  `$XDG_CONFIG_PATH`. It now answers `/Library/Preferences` and `<home>/Library/Preferences`, the same
+  directories the Darwin branch names. The path is built by APPENDING `Library` and `Preferences` to the
+  home URL instead of spelling them as a base-relative `/Library/Preferences`: this tree's CFURL reads a
+  leading `/` as root-relative (RFC 3986), so the Darwin spelling of that one call answered the SYSTEM
+  directory and every user would have shared the administrator's preferences.
+- **`CFPreferences.c`** — `_CFPreferencesURLForStandardDomainWithSafetyLevel()` appended the file name
+  with `CFURLCreateWithFileSystemPathRelativeToBase(…, fileName, …, prefDir)`, which this tree's CFURL does
+  not resolve against `prefDir` either (it answered the bare name), so every write failed `ENOENT` and
+  `CFPreferencesAppSynchronize()` answered false. The name is now appended with
+  `CFURLCreateCopyAppendingPathComponent()`. MEASURED: `CFPreferencesSetAppValue()` +
+  `CFPreferencesAppSynchronize()` writes `~/Library/Preferences/<domain>.plist` and the value reads back.
+- **`CFSystemDirectories.c`** — `CFCopySearchPathForDirectoriesInDomains()` had no non-Darwin
+  implementation at all (the file compiled to nothing there). It now has the table that
+  `libagora-base`'s `NSSearchPathForDirectoriesInDomains()` maps onto — one entry per directory type, NULL
+  where a domain does not carry it, the two union types composed from the same rows, no repeats, and
+  `expandTilde` deciding between `/Users/<name>/Library` and `~/Library` — so a C caller and an
+  Objective-C caller cannot see different directories. `CFSearchPathDirectory` gained the two cases
+  Foundation's 10.11 list has and this older enum did not (`kCFApplicationScriptsDirectory`,
+  `kCFTrashDirectory`).
+- **`CFBundle.c`** — `_CFBundleSupportsFHSBundles()` answered true, so swift-corelibs' Linux packaging
+  layout (`share/Foo.resources`, executables under `lib`/`libexec`) was recognized as a bundle. An Agora
+  bundle is `Foo.app/Contents/…` installed in `/Applications` (or `~/Applications`), so that layout is not
+  a bundle here: `_CFBundleUsesFHSLayout` is 0 and the FHS predicates compile to false.
+- **`CFBundle_Locale.c`** — `_CFBundleCopyUserLanguages()` carried a NULL stub where macOS reads
+  `AppleLanguages` from `.GlobalPreferences`. It now asks `CFPreferencesCopyAppValue()`, i.e. the same
+  `~/Library/Preferences/.GlobalPreferences.plist` the change above puts the store in; the environment
+  variable still wins. KNOWN GAP, stated rather than implied: on this build the list has no observable
+  effect yet, because `_CFBundleCreateMutableArrayOfFallbackLanguages()` scores candidates with Apple's
+  private `ualoc_localizationsToUse()` under `__HAS_APPLE_ICU__`, and a system-ICU build compiles the
+  zero-result branch. The READ — which store the setting comes from — is the half this change settles;
+  the matcher is a separate piece of work and is not claimed here.
+- **`CFError.c`** — the POSIX error callback's `CoreTypes.bundle` lookup was `TARGET_OS_MAC`-only. It is now
+  compiled wherever the search path answers, so an installation that ships
+  `/System/Library/CoreServices/CoreTypes.bundle` gets the localized failure reasons, and one that does not
+  simply finds no bundle.
+
 ### `CFHyphenation.c`, which upstream does not have here
 
 `CFString.h` declares `CFStringGetHyphenationLocationBeforeIndex` and

@@ -136,7 +136,15 @@ static void _CFBundleEnsureBundlesExistForImagePaths(CFArrayRef imagePaths);
 
 #pragma mark -
 
-#if !DEPLOYMENT_RUNTIME_OBJC && !TARGET_OS_WIN32 && !TARGET_OS_ANDROID
+/* **AGORA'S BUNDLES ARE MAC BUNDLES, ON EVERY HOST IT RUNS ON.** The upstream branches below implement
+ * swift-corelibs' FHS convention - `share/Foo.resources` for the resources and `lib`/`libexec` for the
+ * binary - which is a Linux *packaging* convention rather than a Cocoa one. An Agora installation puts a
+ * bundle in `/Applications` (or `~/Applications`) and the bundle is `Foo.app/Contents/...`, exactly the
+ * shape a Mac reads, so `share/Foo.resources` is not a bundle here and nothing should recognize it as one.
+ * A compile-time constant rather than a runtime check: this is a fact about the image, not a policy. */
+#define _CFBundleUsesFHSLayout 0
+
+#if !_CFBundleUsesFHSLayout && !DEPLOYMENT_RUNTIME_OBJC && !TARGET_OS_WIN32 && !TARGET_OS_ANDROID
 
 // Functions and constants for FHS bundles:
 #define _CFBundleFHSDirectory_share CFSTR("share")
@@ -161,10 +169,10 @@ static bool _CFBundleURLIsForFHSInstalledBundle(CFURLRef bundleURL) {
     
     return isFHSBundle;
 }
-#endif // !DEPLOYMENT_RUNTIME_OBJC && !TARGET_OS_WIN32 && !TARGET_OS_ANDROID
+#endif // !_CFBundleUsesFHSLayout && !DEPLOYMENT_RUNTIME_OBJC && !TARGET_OS_WIN32 && !TARGET_OS_ANDROID
 
 CF_CROSS_PLATFORM_EXPORT bool _CFBundleSupportsFHSBundles() {
-#if !DEPLOYMENT_RUNTIME_OBJC && !TARGET_OS_WIN32 && !TARGET_OS_ANDROID
+#if !_CFBundleUsesFHSLayout && !DEPLOYMENT_RUNTIME_OBJC && !TARGET_OS_WIN32 && !TARGET_OS_ANDROID
     return true;
 #else
     return false;
@@ -822,7 +830,7 @@ static CFBundleRef _CFBundleCreate(CFAllocatorRef allocator, CFURLRef bundleURL,
 
     bundle->_url = newURL;
     
-#if !DEPLOYMENT_RUNTIME_OBJC && !TARGET_OS_WIN32 && !TARGET_OS_ANDROID
+#if !_CFBundleUsesFHSLayout && !DEPLOYMENT_RUNTIME_OBJC && !TARGET_OS_WIN32 && !TARGET_OS_ANDROID
     bundle->_isFHSInstalledBundle = _CFBundleURLIsForFHSInstalledBundle(newURL);
 #endif
 

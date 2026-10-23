@@ -582,7 +582,12 @@ CF_PRIVATE CFArrayRef _CFBundleCopyUserLanguages() {
     os_unfair_lock_lock(&_CFBundleUserLanguagesLock);
     
     if (_CFBundleUserLanguages == NULL) {
-        CFArrayRef preferencesArray = NULL;
+        /* **THE USER'S LANGUAGES COME FROM THE GLOBAL PREFERENCES DOMAIN, WHICH IS IN ~/Library/Preferences.**
+         * This used to be a NULL stub with a comment ("could perhaps read out of LANG"), so a bundle ignored
+         * the setting entirely: `AppleLanguages` in `.GlobalPreferences` is where the Mac keeps the ordered
+         * list, and a complete Agora installation puts that file where this now looks. The environment's
+         * `AppleLanguages` (if any) still wins, which is the test door. */
+        CFArrayRef preferencesArray = (CFArrayRef)CFPreferencesCopyAppValue(CFSTR("AppleLanguages"), CFSTR(".GlobalPreferences"));
         if (__CFAppleLanguages) {
             CFDataRef data;
             CFIndex length = strlen((const char *)__CFAppleLanguages);

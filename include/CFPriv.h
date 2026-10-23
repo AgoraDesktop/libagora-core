@@ -214,6 +214,11 @@ typedef CF_ENUM(CFIndex, CFSearchPathDirectory) {
     kCFSharedPublicDirectory = 21,           // location of user's Public sharing directory (~/Public)
     kCFPreferencePanesDirectory = 22,        // location of the PreferencePanes directory for use with System Preferences (Library/PreferencePanes)
 
+    /* AGORA: the two directories the 10.11 search path has and this older enum does not. They continue the
+     * contiguous run, which is what keeps the mapping from NSSearchPathDirectory arithmetic below 23. */
+    kCFApplicationScriptsDirectory = 23,     // location of the application scripts directory (Library/Application Scripts)
+    kCFTrashDirectory = 24,                  // location of the user's trash (.Trash)
+
     kCFAllApplicationsDirectory = 100,	/* all directories where applications can occur (ie Applications, Demos, Administration, Developer/Applications) */
     kCFAllLibrariesDirectory = 101	/* all directories where resources can occur (Library, Developer) */
 };
@@ -226,7 +231,11 @@ typedef CF_OPTIONS(CFOptionFlags, CFSearchPathDomainMask) {
     kCFAllDomainsMask = 0x0ffff	/* all domains: all of the above and more, future items */
 };
 
-#if TARGET_OS_MAC || TARGET_OS_EMBEDDED
+/* THE INSTALLATION'S DIRECTORY SET, BY DIRECTORY TYPE AND DOMAIN. On Darwin this is the System.framework
+ * enumeration; on the platforms Agora runs on (Linux and the BSDs) it is the same table Foundation answers
+ * (`libagora-base` maps NSSearchPathDirectory onto this enum), so a C caller and an Objective-C caller
+ * cannot see different directories. */
+#if TARGET_OS_MAC || TARGET_OS_EMBEDDED || TARGET_OS_LINUX || TARGET_OS_BSD
 CF_EXPORT
 CFArrayRef CFCopySearchPathForDirectoriesInDomains(CFSearchPathDirectory directory, CFSearchPathDomainMask domainMask, Boolean expandTilde);
 #endif

@@ -461,7 +461,11 @@ static CFURLRef _CFPreferencesURLForStandardDomainWithSafetyLevel(CFStringRef do
     }
     if (fileName) {
 #if TARGET_OS_MAC || TARGET_OS_LINUX || TARGET_OS_BSD || TARGET_OS_WASI
-        theURL = CFURLCreateWithFileSystemPathRelativeToBase(prefAlloc, fileName, kCFURLPOSIXPathStyle, false, prefDir);
+        /* **THE FILE NAME IS A PATH COMPONENT, NOT A BASE-RELATIVE PATH.** A relative file-system path is
+         * not resolved against `prefDir` by this tree's CFURL (it answers the bare name), which left the
+         * domain's URL naming nothing and every write failing ENOENT. Appending the component asks for
+         * `prefDir/fileName` without relying on that resolution. */
+        theURL = CFURLCreateCopyAppendingPathComponent(prefAlloc, prefDir, fileName, false);
 #elif TARGET_OS_WIN32
 		theURL = CFURLCreateWithFileSystemPathRelativeToBase(prefAlloc, fileName, kCFURLWindowsPathStyle, false, prefDir);
 #endif

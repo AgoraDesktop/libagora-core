@@ -42,36 +42,60 @@ CFURLRef _Nullable _CFKnownLocationCreatePreferencesURLForUser(CFKnownLocationUs
             username = NULL;
             // passthrough to:
         case _kCFKnownLocationUserByName: {
+            /* **THE COMPONENTS ARE APPENDED, NOT SPELLED AS A BASE-RELATIVE PATH.** A file-system path that
+             * begins with `/` is ROOT-relative to this tree's CFURL (RFC 3986's rule), so
+             * `CFURLCreateWithFileSystemPathRelativeToBase("/Library/Preferences", home)` answers the SYSTEM
+             * directory - and the preferences of every user would be the administrator's. Appending the two
+             * components asks for the directory inside the home without depending on how a leading slash is
+             * read. */
             CFURLRef home = CFCopyHomeDirectoryURLForUser(username);
-            location = CFURLCreateWithFileSystemPathRelativeToBase(kCFAllocatorSystemDefault, CFSTR("/Library/Preferences"), kCFURLPOSIXPathStyle, true, home);
+            CFURLRef library = CFURLCreateCopyAppendingPathComponent(kCFAllocatorSystemDefault, home, CFSTR("Library"), true);
+            location = CFURLCreateCopyAppendingPathComponent(kCFAllocatorSystemDefault, library, CFSTR("Preferences"), true);
+            CFRelease(library);
             CFRelease(home);
             
             break;
         }
             
     }
-#elif !DEPLOYMENT_RUNTIME_OBJC && !TARGET_OS_WIN32 && !TARGET_OS_ANDROID
-    
+#elif !TARGET_OS_WIN32 && !TARGET_OS_ANDROID
+
 /*
- Building for an OS that uses the FHS, BSD's hier(7), and/or the XDG specification for paths:
+ Building for Agora on Linux, the BSDs and anything else that is not Darwin, Windows or Android.
  
+ **THE PREFERENCES LIVE IN THE MAC-SHAPED DIRECTORIES, BECAUSE A COMPLETE AGORA INSTALLATION CARRIES THEM.**
+ This used to be the FHS/XDG branch (`/usr/local/etc` and `$XDG_CONFIG_PATH`), which is swift-corelibs'
+ answer for a system that keeps its files where the FHS says; Agora's Cocoa layer does not. The installation
+ creates `/Library/Preferences` and `~/Library/Preferences` (workspace `README.md`, "The installation"), and
+ an application that keeps its preferences where the Mac keeps them finds the same directory whether it is
+ built for Darwin or for Agora. `_CFXDGCreateConfigHomePath()` remains for the Swift Foundation overlay,
+ which has its own FHS parity decision to make; nothing in this stack calls it.
+
  User:
- - Any: /usr/local/etc/
- - Current: $XDG_CONFIG_PATH (usually: $HOME/.config/).
+ - Any: /Library/Preferences
+ - Current: $HOME/Library/Preferences
  */
     
     switch (user) {
         case _kCFKnownLocationUserAny:
-            location = CFURLCreateWithFileSystemPath(kCFAllocatorSystemDefault, CFSTR("/usr/local/etc"), kCFURLPOSIXPathStyle, true);
+            location = CFURLCreateWithFileSystemPath(kCFAllocatorSystemDefault, CFSTR("/Library/Preferences"), kCFURLPOSIXPathStyle, true);
             break;
             
-        case _kCFKnownLocationUserByName:
-            assert(username == NULL);
+        case _kCFKnownLocationUserCurrent:
+            username = NULL;
             // passthrough to:
-        case _kCFKnownLocationUserCurrent: {
-            CFStringRef path = _CFXDGCreateConfigHomePath();
-            location = CFURLCreateWithFileSystemPath(kCFAllocatorSystemDefault, path, kCFURLPOSIXPathStyle, true);
-            CFRelease(path);
+        case _kCFKnownLocationUserByName: {
+            /* **THE COMPONENTS ARE APPENDED, NOT SPELLED AS A BASE-RELATIVE PATH.** A file-system path that
+             * begins with `/` is ROOT-relative to this tree's CFURL (RFC 3986's rule), so
+             * `CFURLCreateWithFileSystemPathRelativeToBase("/Library/Preferences", home)` answers the SYSTEM
+             * directory - and the preferences of every user would be the administrator's. Appending the two
+             * components asks for the directory inside the home without depending on how a leading slash is
+             * read. */
+            CFURLRef home = CFCopyHomeDirectoryURLForUser(username);
+            CFURLRef library = CFURLCreateCopyAppendingPathComponent(kCFAllocatorSystemDefault, home, CFSTR("Library"), true);
+            location = CFURLCreateCopyAppendingPathComponent(kCFAllocatorSystemDefault, library, CFSTR("Preferences"), true);
+            CFRelease(library);
+            CFRelease(home);
             
             break;
         }
