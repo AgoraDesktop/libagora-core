@@ -1192,16 +1192,18 @@ CFNumberRef CFNumberCreate(CFAllocatorRef allocator, CFNumberType type, const vo
 CFNumberType CFNumberGetType(CFNumberRef number) {
     CF_SWIFT_FUNCDISPATCHV(_kCFRuntimeIDCFNumber, CFNumberType, (CFSwiftRef)number, NSNumber._cfNumberGetType);
     CFNumberType type;
-#if DEPLOYMENT_RUNTIME_OBJC
-    if (CF_IS_OBJC(_kCFRuntimeIDCFNumber, (const void *)number)) {
-        type = (CFNumberType)[(NSNumber *)number _cfNumberType];
-    } else {
-#endif
-         __CFAssertIsNumber(number);
-        type = __CFNumberGetType(number);
-#if DEPLOYMENT_RUNTIME_OBJC
-    }
-#endif
+
+    /* AGORA: THE DISPATCH IS LIVE IN A C BUILD TOO, AND IT WAS NOT. The branch below used to sit inside
+     * `#if DEPLOYMENT_RUNTIME_OBJC`, which this tree does not define, so a FOUNDATION number was read as a Core
+     * Foundation one: CFNumberGetType answered the low bits of the object's first field (measured: 42 was
+     * reported as kCFNumberSInt32Type, and 3 is not even the type it was created with) and the BINARY
+     * property-list writer consequently stored a DOUBLE as an integer (measured: 1.5 read back as 1.0).
+     * CF_OBJC_FUNCDISPATCHV is the live spelling -- a no-op in a C translation unit and a message send under
+     * __OBJC__ -- which is exactly the condition this needs, and it is what _CFNumberGetType2 below already
+     * does. */
+    CF_OBJC_FUNCDISPATCHV(_kCFRuntimeIDCFNumber, CFNumberType, (NSNumber *)number, _cfNumberType);
+    __CFAssertIsNumber(number);
+    type = __CFNumberGetType(number);
     if (kCFNumberSInt128Type == type) type = kCFNumberSInt64Type; // must hide this type, since it is not public
     return type;
 }
