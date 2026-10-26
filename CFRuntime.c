@@ -2567,6 +2567,10 @@ static uintptr_t cf_bridged_subclass(CFTypeID typeID, const void *cls_ref)
 	if (typeID == _kCFRuntimeIDCFBoolean) {
 		__CFBooleanBindOwnedClass((void *)sub);
 	}
+	/* AND CFNumber HAS SEVEN: the float constants for zero, one, NaN and both infinities. */
+	if (typeID == _kCFRuntimeIDCFNumber) {
+		__CFNumberBindOwnedClass((void *)sub);
+	}
 	/* AND THE MUTABLE HALF, IF THIS TYPE HAS ONE: the same construction over Foundation's MUTABLE class,
 	 * with each method's TYPES TAKEN FROM FOUNDATION'S PROTOTYPE. */
 	for (size_t m = 0; cf_own_mutable_classes[m].name != NULL; m++) {

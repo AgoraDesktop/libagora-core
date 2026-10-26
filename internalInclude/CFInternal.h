@@ -859,6 +859,7 @@ extern void _CFRuntimeSetInstanceTypeIDAndIsa(CFTypeRef cf, CFTypeID newTypeID);
  * called from CFRuntime.c. */
 CF_PRIVATE void __CFNullBindOwnedClass(void *cls);
 CF_PRIVATE void __CFBooleanBindOwnedClass(void *cls);
+CF_PRIVATE void __CFNumberBindOwnedClass(void *cls);
 
 /* THE MUTATION WORD AN ARRAY'S FAST-ENUMERATION LOOP POLLS. An accessor because struct __CFArray is private
  * to CFArray.c, and the owned MUTABLE class -- which lives in CFRuntime.c -- has to hand Foundation the

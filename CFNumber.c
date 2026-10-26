@@ -401,47 +401,74 @@ struct __CFNumber {
 DECLARE_STATIC_CLASS_REF(__NSCFNumber);
 
 // Note: The isa for these things is fixed up later
-static _CF_CONSTANT_OBJECT_BACKING struct __CFNumber __kCFNumberNaN = {
+static struct __CFNumber __kCFNumberNaN = {
     INIT_CFRUNTIME_BASE_WITH_CLASS_AND_FLAGS(__NSCFNumber, _kCFRuntimeIDCFNumber, kCFNumberFloat64CanonicalTypeIndex),
     { ._64.bits = BITSFORDOUBLENAN }
 };
 const CFNumberRef kCFNumberNaN = &__kCFNumberNaN;
 
-static _CF_CONSTANT_OBJECT_BACKING struct __CFNumber __kCFNumberNegativeInfinity = {
+static struct __CFNumber __kCFNumberNegativeInfinity = {
     INIT_CFRUNTIME_BASE_WITH_CLASS_AND_FLAGS(__NSCFNumber, _kCFRuntimeIDCFNumber, kCFNumberFloat64CanonicalTypeIndex),
     { ._64.bits = BITSFORDOUBLENEGINF }
 };
 const CFNumberRef kCFNumberNegativeInfinity = &__kCFNumberNegativeInfinity;
 
-static _CF_CONSTANT_OBJECT_BACKING struct __CFNumber __kCFNumberPositiveInfinity = {
+static struct __CFNumber __kCFNumberPositiveInfinity = {
     INIT_CFRUNTIME_BASE_WITH_CLASS_AND_FLAGS(__NSCFNumber, _kCFRuntimeIDCFNumber, kCFNumberFloat64CanonicalTypeIndex),
     { ._64.bits = BITSFORDOUBLEPOSINF }
 };
 const CFNumberRef kCFNumberPositiveInfinity = &__kCFNumberPositiveInfinity;
 
-static _CF_CONSTANT_OBJECT_BACKING struct __CFNumber __kCFNumberFloat32Zero = {
+static struct __CFNumber __kCFNumberFloat32Zero = {
     INIT_CFRUNTIME_BASE_WITH_CLASS_AND_FLAGS(__NSCFNumber, _kCFRuntimeIDCFNumber, kCFNumberFloat32CanonicalTypeIndex),
     { ._32.floatValue = 0.0f }
 };
 static const CFNumberRef kCFNumberFloat32Zero = &__kCFNumberFloat32Zero;
 
-static _CF_CONSTANT_OBJECT_BACKING struct __CFNumber __kCFNumberFloat32One = {
+static struct __CFNumber __kCFNumberFloat32One = {
     INIT_CFRUNTIME_BASE_WITH_CLASS_AND_FLAGS(__NSCFNumber, _kCFRuntimeIDCFNumber, kCFNumberFloat32CanonicalTypeIndex),
     { ._32.floatValue = 1.0f }
 };
 static const CFNumberRef kCFNumberFloat32One = &__kCFNumberFloat32One;
 
-static _CF_CONSTANT_OBJECT_BACKING struct __CFNumber __kCFNumberFloat64Zero = {
+static struct __CFNumber __kCFNumberFloat64Zero = {
     INIT_CFRUNTIME_BASE_WITH_CLASS_AND_FLAGS(__NSCFNumber, _kCFRuntimeIDCFNumber, kCFNumberFloat64CanonicalTypeIndex),
     { ._64.floatValue = 0.0f }
 };
 static const CFNumberRef kCFNumberFloat64Zero = &__kCFNumberFloat64Zero;
 
-static _CF_CONSTANT_OBJECT_BACKING struct __CFNumber __kCFNumberFloat64One = {
+static struct __CFNumber __kCFNumberFloat64One = {
     INIT_CFRUNTIME_BASE_WITH_CLASS_AND_FLAGS(__NSCFNumber, _kCFRuntimeIDCFNumber, kCFNumberFloat64CanonicalTypeIndex),
     { ._64.floatValue = 1.0f }
 };
 static const CFNumberRef kCFNumberFloat64One = &__kCFNumberFloat64One;
+
+/* **THE STATIC FLOAT CONSTANTS ARE BORN WITH NO CLASS, FOR THE SAME REASON CFBOOLEAN'S TWO ARE.** `STATIC_CLASS_REF`
+ * is NULL in a build where Foundation does not define the classes, so the isa compiled into these constants is 0 and
+ * messaging one is a crash. MEASURED: a binary property list holding a real 0.0 read back a pointer whose
+ * `object_getClass` was nil and whose `-isKindOfClass:` segfaulted -- so every plist with a 0.0, 1.0, NaN or infinity
+ * (a slider's minimum, a scale factor, a margin) was unreadable from Objective-C. `cf_bridged_subclass` calls this the
+ * moment the owned `__NSCFNumber` class exists, exactly as it does for CFBoolean and CFNull. */
+CF_PRIVATE void __CFNumberBindOwnedClass(void *cls) {
+    uintptr_t isa = (uintptr_t)cls;
+    struct __CFNumber *constants[] = {
+	(struct __CFNumber *)(void *)&__kCFNumberNaN,
+	(struct __CFNumber *)(void *)&__kCFNumberNegativeInfinity,
+	(struct __CFNumber *)(void *)&__kCFNumberPositiveInfinity,
+	(struct __CFNumber *)(void *)&__kCFNumberFloat32Zero,
+	(struct __CFNumber *)(void *)&__kCFNumberFloat32One,
+	(struct __CFNumber *)(void *)&__kCFNumberFloat64Zero,
+	(struct __CFNumber *)(void *)&__kCFNumberFloat64One,
+    };
+    size_t i;
+
+    if (isa == 0) {
+	return;
+    }
+    for (i = 0; i < sizeof(constants) / sizeof(constants[0]); i++) {
+	constants[i]->_base._cfisa = isa;
+    }
+}
 
 static const struct {
     uint16_t canonicalType:5;	// canonical fixed-width type
