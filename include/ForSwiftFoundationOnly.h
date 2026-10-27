@@ -567,7 +567,11 @@ _stat_with_btime(const char *filename, struct stat *buffer, struct timespec *bti
             .st_gid = statx_buffer.stx_gid,
             .st_rdev = makedev(statx_buffer.stx_rdev_major, statx_buffer.stx_rdev_minor),
             .st_size = (off_t)statx_buffer.stx_size,
-            .st_blksize = statx_buffer.stx_blksize,
+            // THE CAST IS NOT DECORATION: `stx_blksize` is `__u32` and `struct stat`'s `st_blksize` is `__blksize_t`,
+            // which is `long` on x86-64 but plain `int` on aarch64. In C++ a brace initializer that narrows a
+            // non-constant is an ERROR (-Wc++11-narrowing, not a warning), and this header is compiled as
+            // Objective-C++ by every client gate — so without the cast the whole umbrella fails to compile there.
+            .st_blksize = (blksize_t)statx_buffer.stx_blksize,
             .st_blocks = (blkcnt_t)statx_buffer.stx_blocks,
             .st_atim = { .tv_sec = statx_buffer.stx_atime.tv_sec, .tv_nsec = statx_buffer.stx_atime.tv_nsec },
             .st_mtim = { .tv_sec = statx_buffer.stx_mtime.tv_sec, .tv_nsec = statx_buffer.stx_mtime.tv_nsec },
